@@ -19,7 +19,10 @@ class Notifier
         $body  = "$target\n🔴 {$counts['critical']}  🟠 {$counts['high']}  🟡 {$counts['medium']}  🔵 {$counts['low']}";
 
         if (!empty($settings['ntfy'])) {
-            self::post(rtrim($settings['ntfy'], '/'), $body, [
+            // Acepta "micanal" o "https://ntfy.sh/micanal"
+            $ntfy = trim($settings['ntfy']);
+            if (!preg_match('#^https?://#i', $ntfy)) $ntfy = 'https://ntfy.sh/' . $ntfy;
+            self::post(rtrim($ntfy, '/'), $body, [
                 "Title: $title",
                 'Priority: high',
                 'Tags: shield,warning',

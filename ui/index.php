@@ -75,7 +75,7 @@ if ($path === '/webs/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'docroot' => trim((string) ($_POST['docroot'] ?? '')),
     ];
     file_put_contents($websFile, json_encode($webs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    header('Location: /#webs');
+    header('Location: /?ok=web#webs');
     return true;
 }
 
@@ -95,7 +95,7 @@ if ($path === '/settings/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'tg_chat'  => trim((string) ($_POST['tg_chat'] ?? '')),
         'webhook'  => trim((string) ($_POST['webhook'] ?? '')),
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    header('Location: /#ajustes');
+    header('Location: /?ok=ajustes#ajustes');
     return true;
 }
 
@@ -300,6 +300,11 @@ foreach (array_slice($jobs, 0, 20) as $d) {
 if (!$jobsHtml) $jobsHtml = "<div class='muted'>Sin auditorias todavia.</div>";
 
 $err  = isset($_GET['err']) ? "<div class='card' style='border-color:#ef4444;color:#fca5a5'>Marca o escribe al menos una web a auditar.</div>" : '';
+$ok   = match ($_GET['ok'] ?? '') {
+    'web'     => "<div class='card' style='border-color:#22c55e;color:#86efac'>✅ Web guardada. Ya la tienes arriba en \"Webs guardadas\", lista para auditar.</div>",
+    'ajustes' => "<div class='card' style='border-color:#22c55e;color:#86efac'>✅ Ajustes guardados.</div>",
+    default   => '',
+};
 $ntfy = htmlspecialchars($settings['ntfy'] ?? '');
 $tgT  = htmlspecialchars($settings['tg_token'] ?? '');
 $tgC  = htmlspecialchars($settings['tg_chat'] ?? '');
@@ -307,6 +312,8 @@ $whk  = htmlspecialchars($settings['webhook'] ?? '');
 
 echo head('Panel', $logo);
 echo <<<HTML
+$err
+$ok
 <div class="card" id="alertas">
   <h2>🔔 Alertas</h2>$alertsHtml
 </div>

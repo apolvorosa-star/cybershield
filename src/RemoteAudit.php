@@ -69,7 +69,7 @@ class RemoteAudit
         }
         ftp_pasv($ftp, true);
 
-        $remoteDir = $conn['docroot'] ?? '/';
+        $remoteDir = trim((string) ($conn['docroot'] ?? '')) ?: '/';
         if ($remoteDir !== '/' && !@ftp_chdir($ftp, $remoteDir)) {
             ftp_close($ftp);
             return ['error' => "FTP ok pero no existe el directorio remoto '$remoteDir'"];
