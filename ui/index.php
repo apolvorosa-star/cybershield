@@ -410,6 +410,25 @@ if ($path === '/fix/auto' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     return true;
 }
 
+// ---------- Probar conexion IA ----------
+if ($path === '/aitest' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $t0 = microtime(true);
+    $r  = Orizon\CyberShield\AiFixer::fix($settings,
+        ['rule' => 'csrf', 'line' => 1, 'desc' => 'Test de conexion'],
+        "<?php\n\$_GET['x'] = 1;\necho 'ok';", 'test.php');
+    $secs = round(microtime(true) - $t0, 1);
+    echo head('Test IA', $logo) . "<div class='card'><h2>🔬 Prueba de IA</h2>";
+    if (isset($r['code'])) {
+        echo "<div style='color:#86efac'>✅ La IA respondio en {$secs}s — endpoint y modelo funcionan.<br>"
+            . "<span class='muted'>" . htmlspecialchars((string) ($settings['ai_url'] ?: 'api.openai.com')) . " · modelo " . htmlspecialchars((string) ($settings['ai_model'] ?: 'gpt-4o-mini')) . "</span></div>";
+    } else {
+        echo "<div class='alert'>❌ " . htmlspecialchars((string) $r['error']) . "<br><br>"
+            . "<span class='muted'>Si usas Ollama: arrancalo con <code>ollama serve</code> y baja un modelo con <code>ollama pull qwen2.5-coder</code>.</span></div>";
+    }
+    echo "<div class='row'><a class='btn sm' href='/'>← volver</a></div></div></body></html>";
+    return true;
+}
+
 if ($path === '/fix/auto') {
     $id  = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
     $i   = (int) ($_GET['i'] ?? 0);
@@ -655,7 +674,8 @@ C:\xampp\htdocs\mi-web
       <div><label class="f">IA: API key</label><input type="password" name="ai_key" value="$aiK" placeholder="sk-... (locales no necesitan key)"></div>
       <div><label class="f">IA: modelo</label><input type="text" name="ai_model" value="$aiM" placeholder="gpt-4o-mini / qwen2.5-coder…"></div>
     </div>
-    <div class="row"><button class="btn sm" type="submit">Guardar</button></div>
+    <div class="row"><button class="btn sm" type="submit">Guardar</button>
+    <button class="btn sm" type="submit" formaction="/aitest" formnovalidate style="background:#0e7490">🔬 Probar IA</button></div>
     <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts.<br><b>IA local gratis</b>: instala Ollama (ollama.com) o LM Studio, baja un modelo de codigo (qwen2.5-coder, codellama…), elige el preset y guarda — sin API key, tus ficheros no salen de tu PC. Con IA en la nube (OpenAI/DeepSeek/Groq) pon tu API key. Sin nada configurado, "Reparar con IA" genera el prompt para copiar a mano.</div>
     <script>function aip(v){const M={openai:['https://api.openai.com/v1/chat/completions','gpt-4o-mini'],deepseek:['https://api.deepseek.com/v1/chat/completions','deepseek-chat'],groq:['https://api.groq.com/openai/v1/chat/completions','llama-3.3-70b-versatile'],ollama:['http://127.0.0.1:11434/v1/chat/completions','qwen2.5-coder'],lmstudio:['http://127.0.0.1:1234/v1/chat/completions','local-model'],manual:['','']};if(!M[v])return;document.querySelector('[name=ai_url]').value=M[v][0];document.querySelector('[name=ai_model]').value=M[v][1];}</script>
   </form>
