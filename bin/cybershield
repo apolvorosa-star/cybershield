@@ -1,0 +1,7 @@
+#!/usr/bin/env php
+<?php
+/**
+ * CyberShield AI — binario CLI (Composer "bin").
+ * Instalado como dependencia queda en vendor/bin/cybershield.
+ */
+require dirname(__DIR__) . '/src/cli.php';

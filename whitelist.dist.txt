@@ -1,0 +1,16 @@
+# CyberShield — lista blanca de reparacion/cuarentena (PLANTILLA)
+# Copia este archivo como whitelist.txt (o usa .cybershield-whitelist
+# en el docroot del proyecto auditado). whitelist.txt es local y no se
+# distribuye con el paquete.
+#
+# Una linea por entrada. # = comentario.
+#
+# Formatos:
+#   ruta/relativa/archivo            -> excluye en cualquier proyecto auditado
+#   C:/ruta/al/docroot|ruta/relativa -> excluye solo en ese proyecto
+#   Se admiten comodines * (fnmatch, sin distinguir mayusculas)
+#
+# Ejemplos:
+#   docs/manual.sql
+#   C:/xampp/htdocs/miweb|install.php
+#   */seeders/*.sql

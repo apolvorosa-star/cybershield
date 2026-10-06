@@ -1,0 +1,38 @@
+{
+    "name": "orizon/cybershield",
+    "description": "Auditor de seguridad defensiva para PHP/MySQL: analisis estatico OWASP (SQLi, XSS, CSRF), access logs y docroot. Sin dependencias, con informe ejecutivo y HTML.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "security", "cybersecurity", "audit", "owasp", "pentest",
+        "sql-injection", "xss", "csrf", "wordpress", "static-analysis",
+        "apache-logs", "defensive-security"
+    ],
+    "authors": [
+        {
+            "name": "Orizon Studio",
+            "homepage": "https://orizonstudio.cloud",
+            "role": "Developer"
+        }
+    ],
+    "homepage": "https://github.com/apolvorosa-star/cybershield",
+    "support": {
+        "issues": "https://github.com/apolvorosa-star/cybershield/issues",
+        "source": "https://github.com/apolvorosa-star/cybershield"
+    },
+    "require": {
+        "php": ">=8.0",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Orizon\\CyberShield\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/cybershield"
+    ],
+    "scripts": {
+        "audit": "@php bin/cybershield"
+    }
+}

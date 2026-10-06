@@ -1,0 +1,19 @@
+# Composer
+/vendor/
+composer.lock
+
+# Datos locales / privados (no publicar)
+/informes/
+/informe-ejemplo.html
+/whitelist.txt
+/tools/
+/orizon-servidor.bat
+
+# Generados por la herramienta en proyectos auditados
+.cybershield-quarantine/
+.cybershield-whitelist
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini

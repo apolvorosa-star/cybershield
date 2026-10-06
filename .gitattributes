@@ -1,0 +1,10 @@
+* text=auto eol=lf
+bin/cybershield text eol=lf
+
+# Lo que NO viaja en el paquete Composer / zip de GitHub
+/.gitattributes       export-ignore
+/.gitignore           export-ignore
+/AGENT-PROMPT.md      export-ignore
+/CHANGELOG.md         export-ignore
+/cybershield.php      export-ignore
+/cybershield.bat      export-ignore
