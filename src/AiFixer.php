@@ -51,8 +51,11 @@ PROMPT;
     public static function fix(array $settings, array $f, string $code, string $file): array
     {
         $key = trim($settings['ai_key'] ?? '');
-        if ($key === '') return ['error' => 'Sin ai_key en Ajustes — usa el modo manual (copiar prompt)'];
-        $url   = trim($settings['ai_url'] ?? '') ?: 'https://api.openai.com/v1/chat/completions';
+        $url = trim($settings['ai_url'] ?? '') ?: 'https://api.openai.com/v1/chat/completions';
+        // Endpoints locales (Ollama, LM Studio…) no necesitan API key
+        if ($key === '' && !preg_match('#^https?://(127\.|localhost|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)#i', $url)) {
+            return ['error' => 'Sin ai_key en Ajustes — usa el modo manual (copiar prompt)'];
+        }
         $model = trim($settings['ai_model'] ?? '') ?: 'gpt-4o-mini';
 
         $payload = json_encode([
@@ -67,7 +70,7 @@ PROMPT;
         $ctx = stream_context_create(['http' => [
             'method'  => 'POST',
             'timeout' => 90,
-            'header'  => "Authorization: Bearer $key\r\nContent-Type: application/json",
+            'header'  => ($key !== '' ? "Authorization: Bearer $key\r\n" : '') . 'Content-Type: application/json',
             'content' => $payload,
             'ignore_errors' => true,
         ]]);

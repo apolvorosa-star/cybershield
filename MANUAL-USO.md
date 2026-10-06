@@ -121,9 +121,12 @@ Flujo (siempre con revisión humana — la IA propone, tú decides):
    o del disco si el objetivo era local) y te muestra el código actual.
 2. **Prompt** → despliega «📋 Prompt para IA» y cópialo en tu LLM favorito
    (ChatGPT, Devin, Claude…). Pega el código corregido en el textarea.
-   - Si en **Ajustes** rellenas `ai_url` + `ai_key` + `ai_model`
-     (cualquier endpoint compatible con OpenAI: OpenAI, DeepSeek, Ollama
-     local, Groq…), el panel llama a la API y **pre-rellena** la propuesta.
+   - **IA local gratis (recomendado)**: instala Ollama (ollama.com) o
+     LM Studio, descarga un modelo de código (`ollama pull qwen2.5-coder`),
+     y en **Ajustes → IA: proveedor** elige el preset — sin API key, tu
+     código nunca sale de tu PC.
+   - **IA en la nube**: presets OpenAI / DeepSeek / Groq, pon tu API key.
+   - El preset autorrellena endpoint y modelo.
 3. **Revisa** el código propuesto — no apliques a ciegas.
 4. **✅ Aplicar al servidor** → antes de escribir:
    - valida la sintaxis con `php -l` (si no compila, no toca nada),

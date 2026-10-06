@@ -309,12 +309,12 @@ if ($path === '/fix') {
 
     $proposal = '';
     $note = '';
-    if (!empty($settings['ai_key'])) {
+    if (!empty($settings['ai_key']) || !empty($settings['ai_url'])) {
         $ai = Orizon\CyberShield\AiFixer::fix($settings, $f, $code, (string) $f['file']);
         if (isset($ai['code'])) $proposal = $ai['code'];
         else $note = "<div class='alert'>⚠️ " . htmlspecialchars($ai['error']) . "</div>";
     } else {
-        $note = "<div class='muted'>Sin API key: copia el prompt, pegalo en tu IA (ChatGPT, Devin…) y pega el codigo corregido abajo.</div>";
+        $note = "<div class='muted'>Sin IA configurada: copia el prompt, pegalo en tu IA (ChatGPT, Ollama, Devin…) y pega el codigo corregido abajo. Puedes configurar una IA local gratis en Ajustes.</div>";
     }
     $prompt = htmlspecialchars(Orizon\CyberShield\AiFixer::buildPrompt($f, $code, (string) $f['file']));
     $codeH  = htmlspecialchars($code);
@@ -382,8 +382,9 @@ if ($path === '/fix/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $moved = @copy($rpath, $rpath . '.bak-' . date('Ymd-His'));
         $ok    = $moved && file_put_contents($rpath, $code) !== false;
     }
+    $base = htmlspecialchars(basename($rpath));
     echo $ok
-        ? "<div style='color:#86efac'>✅ Parche aplicado. Original guardado en cuarentena/backup.<br><br><a class='btn sm' href='/fix?id=$id&i=$i'>← seguir reparando</a></div>"
+        ? "<div style='color:#86efac;font-size:16px'>✅ <b>Web reparada</b> — se corrigio <b>$base</b>.<br><span class='muted' style='font-size:12px'>Original guardado en _cs_cuarentena/ · Re-audita para confirmar que el hallazgo desaparecio.</span><br><br><a class='btn sm' href='/fix?id=$id&i=$i'>← seguir reparando</a> <a class='btn sm' href='/'>🔁 re-auditar</a></div>"
         : "<div class='alert'>❌ No se pudo aplicar ($kind: " . htmlspecialchars($rpath) . ")</div>";
     echo "</div></body></html>";
     return true;
@@ -596,12 +597,18 @@ C:\xampp\htdocs\mi-web
       <div><label class="f">Telegram bot token</label><input type="text" name="tg_token" value="$tgT" placeholder="123456:ABC-DEF..."></div>
       <div><label class="f">Telegram chat_id</label><input type="text" name="tg_chat" value="$tgC" placeholder="123456789"></div>
       <div><label class="f">Webhook (JSON POST)</label><input type="text" name="webhook" value="$whk" placeholder="https://tu-n8n/webhook/..."></div>
-      <div><label class="f">IA: endpoint (opcional)</label><input type="text" name="ai_url" value="$aiU" placeholder="https://api.openai.com/v1/chat/completions"></div>
-      <div><label class="f">IA: API key</label><input type="password" name="ai_key" value="$aiK" placeholder="sk-... (vacio = modo manual)"></div>
-      <div><label class="f">IA: modelo</label><input type="text" name="ai_model" value="$aiM" placeholder="gpt-4o-mini"></div>
+      <div><label class="f">IA: proveedor (autorrellena)</label><select onchange="aip(this.value)">
+        <option value="">— elegir —</option><option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option><option value="groq">Groq</option>
+        <option value="ollama">Ollama (local, gratis)</option><option value="lmstudio">LM Studio (local, gratis)</option>
+        <option value="manual">Manual (copiar prompt)</option></select></div>
+      <div><label class="f">IA: endpoint</label><input type="text" name="ai_url" value="$aiU" placeholder="https://api.openai.com/v1/chat/completions"></div>
+      <div><label class="f">IA: API key</label><input type="password" name="ai_key" value="$aiK" placeholder="sk-... (locales no necesitan key)"></div>
+      <div><label class="f">IA: modelo</label><input type="text" name="ai_model" value="$aiM" placeholder="gpt-4o-mini / qwen2.5-coder…"></div>
     </div>
     <div class="row"><button class="btn sm" type="submit">Guardar</button></div>
-    <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts. IA: cualquier endpoint OpenAI-compatible (OpenAI, Ollama local http://127.0.0.1:11434/v1/chat/completions…); sin key, "Reparar con IA" genera el prompt para copiar.</div>
+    <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts.<br><b>IA local gratis</b>: instala Ollama (ollama.com) o LM Studio, baja un modelo de codigo (qwen2.5-coder, codellama…), elige el preset y guarda — sin API key, tus ficheros no salen de tu PC. Con IA en la nube (OpenAI/DeepSeek/Groq) pon tu API key. Sin nada configurado, "Reparar con IA" genera el prompt para copiar a mano.</div>
+    <script>function aip(v){const M={openai:['https://api.openai.com/v1/chat/completions','gpt-4o-mini'],deepseek:['https://api.deepseek.com/v1/chat/completions','deepseek-chat'],groq:['https://api.groq.com/openai/v1/chat/completions','llama-3.3-70b-versatile'],ollama:['http://127.0.0.1:11434/v1/chat/completions','qwen2.5-coder'],lmstudio:['http://127.0.0.1:1234/v1/chat/completions','local-model'],manual:['','']};if(!M[v])return;document.querySelector('[name=ai_url]').value=M[v][0];document.querySelector('[name=ai_model]').value=M[v][1];}</script>
   </form>
 </div>
 
