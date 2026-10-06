@@ -3,13 +3,13 @@
  * CyberShield - RemoteAudit
  *
  * Audita un servidor remoto "de verdad" (codigo incluido), subiendo el
- * agente autocontenido generado por AgentBuilder:
+ * agente efimero de AgentBuilder con auth HMAC (timestamp + firma):
  *
  *  - SSH:  scp del agente a /tmp + ejecucion por CLI (php agent.php).
- *          Nada queda expuesto por HTTP. Necesita llave (OpenSSH no
+ *          Nada queda expuesto por HTTP. Requiere llave (OpenSSH no
  *          acepta password por linea de comandos).
- *  - FTP:  sube el agente al docroot, lo ejecuta via HTTPS con token
- *          y lo borra. Pensado para hosting compartido sin SSH.
+ *  - FTP:  sube el agente al docroot, lo ejecuta via HTTPS firmado
+ *          y lo borra. Para hosting compartido sin SSH.
  */
 
 namespace Orizon\CyberShield;
@@ -20,16 +20,18 @@ class RemoteAudit
      * conn: host, user, port(22), key(ruta a llave privada, opcional)
      * docroot: ruta absoluta en el servidor (p.ej. /var/www/html)
      */
-    public static function viaSsh(array $conn, string $agentCode, string $token, string $docroot): array
+    public static function viaSsh(array $conn, string $secret, string $docroot): array
     {
+        $ts  = time();
+        $sig = hash_hmac('sha256', (string) $ts, $secret);
+
         $tmp = tempnam(sys_get_temp_dir(), 'csa') . '.php';
-        file_put_contents($tmp, $agentCode);
-        $remote = '/tmp/cybershield-agent-' . substr($token, 0, 12) . '.php';
+        file_put_contents($tmp, AgentBuilder::code($secret));
+        $remote = '/tmp/cybershield-agent-' . substr($sig, 0, 12) . '.php';
         $port   = (int) ($conn['port'] ?? 22) ?: 22;
         $keyOpt = !empty($conn['key']) ? ' -i ' . escapeshellarg($conn['key']) : '';
         $host   = escapeshellarg(($conn['user'] ?? 'root') . '@' . $conn['host']);
-
-        $base = '-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new' . $keyOpt;
+        $base   = '-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new' . $keyOpt;
 
         exec("scp $base -P $port " . escapeshellarg($tmp) . " $host:" . escapeshellarg($remote) . " 2>&1", $o1, $c1);
         @unlink($tmp);
@@ -38,7 +40,7 @@ class RemoteAudit
                 . ' (recuerda: SSH requiere llave configurada, password no soportado)'];
         }
 
-        $cmd = escapeshellarg("php " . $remote . ' ' . escapeshellarg($token) . ' ' . escapeshellarg($docroot));
+        $cmd = escapeshellarg("php $remote " . escapeshellarg((string) $ts) . ' ' . escapeshellarg($sig) . ' ' . escapeshellarg($docroot));
         exec("ssh $base -p $port $host $cmd", $o2, $c2);
         exec("ssh $base -p $port $host " . escapeshellarg("rm -f $remote") . ' 2>&1');
 
@@ -53,7 +55,7 @@ class RemoteAudit
      * conn: host, user, pass, port(21), docroot(ruta FTP donde va el agente)
      * url: URL publica que mapea ese docroot (p.ej. https://midominio.com)
      */
-    public static function viaFtp(array $conn, string $agentCode, string $token, string $url): array
+    public static function viaFtp(array $conn, string $secret, string $url): array
     {
         if (!function_exists('ftp_connect')) {
             return ['error' => 'PHP no tiene ext-ftp. Activala en php.ini o usa acceso SSH.'];
@@ -73,18 +75,20 @@ class RemoteAudit
             return ['error' => "FTP ok pero no existe el directorio remoto '$remoteDir'"];
         }
 
-        $name  = 'cybershield-agent-' . substr($token, 0, 12) . '.php';
+        $name  = 'cybershield-agent-' . substr(hash_hmac('sha256', (string) time(), $secret), 0, 12) . '.php';
         $tmp   = tempnam(sys_get_temp_dir(), 'csa') . '.php';
-        file_put_contents($tmp, $agentCode);
+        file_put_contents($tmp, AgentBuilder::code($secret));
         $ok = @ftp_put($ftp, $name, $tmp, FTP_BINARY);
         @unlink($tmp);
         if (!$ok) { ftp_close($ftp); return ['error' => "No se pudo subir $name al docroot remoto"]; }
 
-        // Ejecutar via HTTP con token
-        $agentUrl = rtrim($url, '/') . '/' . $name . '?token=' . $token;
+        // Ejecutar via HTTP con firma HMAC (timestamp dentro de ventana de 5 min)
+        $ts  = time();
+        $sig = hash_hmac('sha256', (string) $ts, $secret);
+        $agentUrl = rtrim($url, '/') . '/' . $name . '?t=' . $ts . '&sig=' . $sig;
         $resp = self::httpGet($agentUrl);
 
-        // Borrar el agente siempre (ademas se autodestruye tras responder)
+        // Borrado doble: el agente se autodestruye + ftp_delete por si acaso
         @ftp_delete($ftp, $name);
         ftp_close($ftp);
 
@@ -103,7 +107,7 @@ class RemoteAudit
         if (extension_loaded('curl')) {
             $ch = curl_init($url);
             curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 120,
+                CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 130,
                 CURLOPT_FOLLOWLOCATION => false, CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_SSL_VERIFYHOST => 0,
                 CURLOPT_USERAGENT => 'CyberShield-AI/1.0 (Orizon Studio)',
@@ -114,7 +118,7 @@ class RemoteAudit
             return ['status' => $code, 'body' => (string) $body];
         }
         $ctx = stream_context_create([
-            'http' => ['timeout' => 120, 'ignore_errors' => true,
+            'http' => ['timeout' => 130, 'ignore_errors' => true,
                        'user_agent' => 'CyberShield-AI/1.0 (Orizon Studio)'],
             'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);

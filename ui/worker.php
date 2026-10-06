@@ -20,7 +20,8 @@ if (!$autoloadFound) {
     }
 }
 
-use Orizon\CyberShield\AgentBuilder;
+use Orizon\CyberShield\CredentialStore;
+use Orizon\CyberShield\Notifier;
 use Orizon\CyberShield\RemoteAudit;
 use Orizon\CyberShield\Report;
 
@@ -33,8 +34,9 @@ $jobsRoot = dirname($jobDir);
 $job      = json_decode((string) file_get_contents($jobDir . '/job.json'), true);
 if (!$job || empty($job['targets'])) exit(1);
 
-$settings  = json_decode((string) @file_get_contents("$jobsRoot/settings.json"), true) ?: [];
+$settings   = json_decode((string) @file_get_contents("$jobsRoot/settings.json"), true) ?: [];
 $alertsFile = $jobsRoot . '/alerts.json';
+CredentialStore::init($jobsRoot);
 
 $save = function (array $status) use ($jobDir): void {
     file_put_contents($jobDir . '/status.json', json_encode($status, JSON_UNESCAPED_UNICODE));
@@ -52,17 +54,8 @@ $alert = function (array $t, array $result) use ($alertsFile, $settings): void {
     ];
     file_put_contents($alertsFile, json_encode($alerts, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 
-    // Push opcional via ntfy.sh (configurar en el panel)
-    if (!empty($settings['ntfy'])) {
-        $c = $result['counts'] ?? [];
-        $body = "{$t['target']}\n$status — 🔴{$c['critical']} 🟠{$c['high']} 🟡{$c['medium']}";
-        $ctx = stream_context_create(['http' => [
-            'method' => 'POST', 'timeout' => 8,
-            'header' => "Title: CyberShield: " . $status . "\r\nPriority: high\r\n",
-            'content' => $body,
-        ]]);
-        @file_get_contents(rtrim($settings['ntfy'], '/'), false, $ctx);
-    }
+    // Push a los canales configurados (ntfy / Telegram / webhook)
+    Notifier::alert($settings, $t['target'], $status, $result['counts'] ?? []);
 };
 
 $status = ['state' => 'running', 'targets' => []];
@@ -81,13 +74,13 @@ foreach ($job['targets'] as $i => $t) {
     $result = null;
 
     if (in_array($t['mode'], ['agent-ssh', 'agent-ftp'], true)) {
-        // ---- Auditoria remota con agente ----
-        $token = bin2hex(random_bytes(16));
-        $conn  = $t['conn'] ?? [];
-        $agent = AgentBuilder::code($token);
+        // ---- Auditoria remota con agente efimero (HMAC) ----
+        $secret = bin2hex(random_bytes(32));
+        $conn   = $t['conn'] ?? [];
+        if (!empty($conn['pass'])) $conn['pass'] = CredentialStore::decrypt($conn['pass']);
         $r = $t['mode'] === 'agent-ssh'
-            ? RemoteAudit::viaSsh($conn, $agent, $token, $conn['docroot'] ?? '/var/www/html')
-            : RemoteAudit::viaFtp($conn, $agent, $token, $t['target']);
+            ? RemoteAudit::viaSsh($conn, $secret, $conn['docroot'] ?? '/var/www/html')
+            : RemoteAudit::viaFtp($conn, $secret, $t['target']);
 
         if (isset($r['error'])) {
             file_put_contents($txt, "ERROR: {$r['error']}\n");

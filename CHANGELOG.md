@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.4.0 — 2026-10-06
+
+- **Credenciales cifradas**: las contraseñas de las fichas de servidor se
+  guardan con AES-256-GCM (`CredentialStore` + clave maestra local), nunca
+  en texto plano. Los valores antiguos en claro siguen funcionando.
+- **Agente efimero v2**: auth por firma HMAC SHA-256 (`t` + `sig`, ventana
+  de 5 min), caducidad dura por TTL (si el archivo lleva >5 min en el
+  servidor se autodestruye aunque nunca se llame) y borrado garantizado por
+  `register_shutdown_function` solo tras auth correcta — una peticion
+  denegada ya no destruye el agente. El agente tampoco se audita a si mismo.
+- **`MalwareScanner`**: webshells (`eval(base64_decode)`, `assert`,
+  `gzinflate`, `create_function`, shells conocidas WSO/b374k/r57/c99),
+  `exec($_GET)` y llamadas a shell con input, PHP suelto en carpetas de
+  subidas (uploads/subidas/media/files/tmp...), `.htaccess` malicioso
+  (`auto_prepend_file`, handler PHP en imagenes, `-Indexes` quitado,
+  reescritura a shells), `phpinfo()` y permisos `0777`. Integrado en
+  `code`, `all`, el agente remoto y `run-saved`.
+- **Nuevo comando `run-saved`**: audita todas las webs guardadas en el
+  panel de una vez — pensado para cron / Programador de tareas. Descifra
+  credenciales solo en memoria, registra alertas y devuelve exit code
+  0 (todo seguro) / 1 (hallazgos) / 2 (errores).
+- **Notificaciones multicanal**: ntfy.sh + bot de Telegram + webhook
+  generico (Discord/Slack/n8n), configurables en Ajustes del panel.
+- Los chequeos de carpetas de subidas/skip usan ahora rutas relativas al
+  docroot (antes un docroot dentro de `Temp/` o `media/` daba falsos
+  positivos).
+
 ## 1.3.0 — 2026-10-06
 
 - **Agente remoto autocontenido** (`AgentBuilder` + `RemoteAudit`): un unico

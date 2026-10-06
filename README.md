@@ -48,17 +48,24 @@ Panel local con marca Orizon:
 - **Auditoría multi-web**: pega URLs, carpetas o logs (uno por línea) y lanza
   la cola. Resultados en vivo por objetivo con informe HTML descargable.
 - **Fichas de webs**: guarda cada web con sus datos de servidor (URL + FTP o
-  SSH + docroot remoto). Se guardan solo en tu PC (`informes/ui/webs.json`).
-- **Agente remoto**: con FTP o SSH, CyberShield sube un `cybershield-agent.php`
-  autocontenido y protegido por token, ejecuta la auditoría *dentro* del
-  servidor real (código + docroot) y lo borra al terminar.
+  SSH + docroot remoto). Se guardan solo en tu PC (`informes/ui/webs.json`) y
+  las **contraseñas van cifradas con AES-256-GCM** — nunca en texto plano.
+- **Agente efímero**: con FTP o SSH, CyberShield genera un agente PHP
+  autocontenido, lo sube al servidor, lo ejecuta firmado con **HMAC
+  SHA-256** (timestamp + firma, ventana de 5 min) y **se autodestruye**
+  tras responder. Si se queda huérfano, su TTL de 5 minutos lo borra solo.
+  Audita *dentro* del servidor: código, docroot y **malware/webshells**.
   - **FTP**: para hosting compartido — sube el agente al docroot y lo ejecuta
-    vía `https://tuweb/agent.php?token=...`
+    vía `https://tuweb/agent.php?t=...&sig=...`
   - **SSH**: `scp` a `/tmp` + ejecución por CLI — nada expuesto por HTTP
     (requiere llave SSH; OpenSSH no acepta contraseña por línea de comandos)
+- **Detector de malware**: patrones de webshell (`eval(base64_decode(...))`,
+  `assert`, `gzinflate`...), PHP suelto en carpetas de subidas, `.htaccess`
+  malicioso (`auto_prepend_file`, handlers PHP en imágenes) y permisos
+  `0777`. Integrado en `code`, `all`, el agente y `run-saved`.
 - **Alertas**: si una auditoría encuentra algo (no-SEGURO), queda registrado
-  en el panel y puede enviarte **push al móvil con ntfy.sh** (gratis, sin
-  cuenta: creas un tópico, te suscribes desde la app del móvil, listo).
+  en el panel y te avisa por **ntfy.sh** (push gratis al móvil), **Telegram**
+  (bot token + chat id) o **webhook** genérico (Discord, Slack, n8n…).
 - **PWA**: instalable en el móvil ("Añadir a pantalla de inicio"). Por HTTPS
   (túnel) o localhost se instala como app nativa.
 
@@ -81,17 +88,19 @@ cybershield web  <https://...>  → Auditoria REMOTA: lo que un atacante vería 
 cybershield log  <access.log>   → IPs atacantes + reglas de bloqueo listas
 cybershield fix  <docroot>      → ¡REPARA! .htaccess blindado + cuarentena + uploads
 cybershield ui                  → Panel web para auditar varias webs con un clic
+cybershield run-saved           → Audita TODAS las fichas guardadas (para cron/Task Scheduler)
 ```
 
 | Modo | Qué hace |
 |---|---|
-| **Código** `code` | Análisis estático OWASP con rastreo de taint: inyección SQL, XSS, CSRF, sanitización, control de acceso, `eval`, includes dinámicos, `unserialize`, subidas, secretos hardcodeados |
+| **Código** `code` | Análisis estático OWASP con rastreo de taint: inyección SQL, XSS, CSRF, sanitización, control de acceso, `eval`, includes dinámicos, `unserialize`, subidas, secretos hardcodeados + **firmas de malware/webshell** |
 | **Servidor** `sys` | `.env`, `.sql`, `.git`, `install.php` expuestos; carpetas de subida sin protección; `php.ini` inseguro |
 | **Remoto** `web` | Comprueba por HTTP si `.env`, `.git`, `composer.json`, backups y `phpinfo.php` son accesibles desde Internet + cabeceras de seguridad (solo GETs pasivos, sin exploits) |
 | **Incidentes** `log` | Access logs de Apache/Nginx: SQLi, traversal, RCE, fuerza bruta y scanners → gravedad + lista de IPs a bloquear (`--block`) |
 | **Todo** `all` | `code` + `sys` + informe ejecutivo |
 | **Reparar** `fix` | `.htaccess` blindado, cuarentena reversible en `.cybershield-quarantine/` y uploads sin ejecución PHP |
-| **Panel** `ui` | App web local: cola de auditorías multi-web, fichas de servidor (FTP/SSH), agente remoto, alertas, historial |
+| **Panel** `ui` | App web local: cola de auditorías multi-web, fichas de servidor (FTP/SSH, credenciales cifradas), agente remoto, alertas, historial, PWA |
+| **Vigilancia** `run-saved` | Re-audita todas las webs guardadas: para cron o el Programador de tareas. Exit code 0/1/2 según gravedad + alertas push |
 
 ## 🧠 Perfiles
 

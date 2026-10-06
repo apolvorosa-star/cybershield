@@ -36,10 +36,12 @@ class TaintScanner
         $this->findings = [];
         $this->filesScanned = 0;
         $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+        $dir = rtrim($dir, '\\/');
         foreach ($it as $f) {
             if ($f->isFile() && strtolower($f->getExtension()) === 'php') {
                 $path = $f->getPathname();
-                if (preg_match('#[\\\\/](vendor|node_modules|\.git|dist|bin|assets)[\\\\/]#i', $path)) continue;
+                $rel = '/' . str_replace('\\', '/', substr($path, strlen($dir) + 1)) . '/';
+                if (preg_match('#/(vendor|node_modules|\.git|dist|bin|assets)/#i', $rel)) continue;
                 $this->scanFile($path);
                 $this->filesScanned++;
             }

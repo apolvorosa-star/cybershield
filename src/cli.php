@@ -83,6 +83,47 @@ if ($mode === 'ui') {
     exit(0);
 }
 
+// ── Auditoria de TODAS las webs guardadas (cron/Task Scheduler) ──
+if ($mode === 'run-saved') {
+    $jobsRoot = dirname(__DIR__) . '/informes/ui';
+    if (!is_dir($jobsRoot)) $jobsRoot = sys_get_temp_dir() . '/cybershield-ui';
+    CredentialStore::init($jobsRoot);
+    $webs     = json_decode((string) @file_get_contents("$jobsRoot/webs.json"), true) ?: [];
+    $settings = json_decode((string) @file_get_contents("$jobsRoot/settings.json"), true) ?: [];
+    $alertsFile = "$jobsRoot/alerts.json";
+    if (!$webs) { echo "Sin webs guardadas en el panel. Anade fichas en cybershield ui.\n"; exit(0); }
+
+    $worst = 0;
+    foreach ($webs as $w) {
+        echo "  → {$w['name']} ({$w['url']}) [{$w['access']}]…\n";
+        $conn = [
+            'host' => $w['host'] ?? '', 'port' => $w['port'] ?? '', 'user' => $w['user'] ?? '',
+            'pass' => CredentialStore::decrypt($w['pass'] ?? ''), 'key' => $w['key'] ?? '',
+            'docroot' => $w['docroot'] ?? '',
+        ];
+        if ($w['access'] === 'ssh') {
+            $r = RemoteAudit::viaSsh($conn, bin2hex(random_bytes(32)), $conn['docroot'] ?: '/var/www/html');
+        } elseif ($w['access'] === 'ftp') {
+            $r = RemoteAudit::viaFtp($conn, bin2hex(random_bytes(32)), $w['url']);
+        } else {
+            $f = (new WebAudit())->audit($w['url']);
+            $r = ['counts' => Report::counts($f), 'status' => Report::globalStatus($f), 'findings' => $f];
+        }
+
+        if (isset($r['error'])) { echo "     ERROR: {$r['error']}\n"; $worst = max($worst, 2); continue; }
+        $c = $r['counts'];
+        echo "     {$r['status']} — 🔴{$c['critical']} 🟠{$c['high']} 🟡{$c['medium']} 🔵{$c['low']}\n";
+        if ($r['status'] !== 'SEGURO') {
+            $worst = max($worst, 1);
+            $alerts = json_decode((string) @file_get_contents($alertsFile), true) ?: [];
+            $alerts[] = ['time' => date('Y-m-d H:i'), 'target' => $w['url'], 'status' => $r['status'], 'counts' => $c];
+            file_put_contents($alertsFile, json_encode($alerts, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            Notifier::alert($settings, $w['url'], $r['status'], $c);
+        }
+    }
+    exit($worst);
+}
+
 if (!$mode || !$target || in_array($mode, ['help', '-h', '--help'], true)) {
     echo "Uso:\n";
     echo "  cybershield code <dir>        Auditoria de codigo (OWASP: SQLi, XSS, CSRF, saneo, permisos)\n";
@@ -91,7 +132,8 @@ if (!$mode || !$target || in_array($mode, ['help', '-h', '--help'], true)) {
     echo "  cybershield all  <dir>        Todo lo anterior + informe ejecutivo\n";
     echo "  cybershield fix  <docroot>    REPARA: .htaccess blindado + cuarentena + uploads protegidos\n";
     echo "  cybershield web  <https://url> Auditoria REMOTA: archivos sensibles y cabeceras desde fuera\n";
-    echo "  cybershield ui                 Panel web local (audita varias webs con un clic)\n\n";
+    echo "  cybershield ui                 Panel web local (audita varias webs con un clic)\n";
+    echo "  cybershield run-saved          Audita TODAS las webs guardadas en el panel (para cron/Task Scheduler)\n\n";
     echo "Opciones:\n";
     echo "  --profile orizon|wordpress|generic   Stack del proyecto (defecto: orizon)\n";
     echo "  --html <fichero.html>                Informe HTML con marca Orizon\n";
@@ -118,6 +160,7 @@ switch ($mode) {
         if (!is_dir($target)) { fwrite(STDERR, "No es un directorio: $target\n"); exit(1); }
         $scanner = new TaintScanner($profile);
         $res = $scanner->scanDir($target);
+        $res['findings'] = mergeMalwareFindings($res['findings'], $target);
         echo "Perfil: {$profile['name']} — {$res['files']} archivos PHP analizados\n";
         echo Report::text($res['findings'], $target);
         echo Report::executive($res['findings'], ['files' => $res['files']]);
@@ -186,7 +229,7 @@ switch ($mode) {
         $res = $scanner->scanDir($target);
         $audit = new SystemAudit();
         $sys = $audit->audit($target, $opts['ini'] ?? null);
-        $allFindings = array_merge($res['findings'], $sys);
+        $allFindings = mergeMalwareFindings(array_merge($res['findings'], $sys), $target);
         echo "Perfil: {$profile['name']} — {$res['files']} archivos PHP + auditoria de docroot\n";
         echo Report::text($allFindings, $target);
         echo Report::executive($allFindings, ['files' => $res['files']]);
@@ -195,6 +238,16 @@ switch ($mode) {
     default:
         fwrite(STDERR, "Modo desconocido: $mode. Usa 'cybershield help'.\n");
         exit(1);
+}
+
+// Combina hallazgos de malware/webshells y reordena por severidad
+function mergeMalwareFindings(array $findings, string $target): array
+{
+    $mal = (new MalwareScanner())->scanDir($target);
+    $order = ['critical' => 0, 'high' => 1, 'medium' => 2, 'low' => 3, 'info' => 4];
+    $all = array_merge($findings, $mal);
+    usort($all, fn($a, $b) => $order[$a['severity']] <=> $order[$b['severity']]);
+    return $all;
 }
 
 if (isset($opts['html'])) {

@@ -16,6 +16,9 @@ $websFile     = $jobsRoot . '/webs.json';
 $alertsFile   = $jobsRoot . '/alerts.json';
 $settingsFile = $jobsRoot . '/settings.json';
 
+require_once $root . '/src/CredentialStore.php';
+Orizon\CyberShield\CredentialStore::init($jobsRoot);
+
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
 
 // Estaticos dentro de ui/ se sirven tal cual (manifest, sw.js)
@@ -67,7 +70,7 @@ if ($path === '/webs/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'host'    => trim((string) ($_POST['host'] ?? '')),
         'port'    => trim((string) ($_POST['port'] ?? '')),
         'user'    => trim((string) ($_POST['user'] ?? '')),
-        'pass'    => (string) ($_POST['pass'] ?? ''),
+        'pass'    => Orizon\CyberShield\CredentialStore::encrypt((string) ($_POST['pass'] ?? '')),
         'key'     => trim((string) ($_POST['key'] ?? '')),
         'docroot' => trim((string) ($_POST['docroot'] ?? '')),
     ];
@@ -87,7 +90,10 @@ if ($path === '/webs/del') {
 // ---------- Ajustes ----------
 if ($path === '/settings/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     file_put_contents($settingsFile, json_encode([
-        'ntfy' => trim((string) ($_POST['ntfy'] ?? '')),
+        'ntfy'     => trim((string) ($_POST['ntfy'] ?? '')),
+        'tg_token' => trim((string) ($_POST['tg_token'] ?? '')),
+        'tg_chat'  => trim((string) ($_POST['tg_chat'] ?? '')),
+        'webhook'  => trim((string) ($_POST['webhook'] ?? '')),
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     header('Location: /#ajustes');
     return true;
@@ -295,6 +301,9 @@ if (!$jobsHtml) $jobsHtml = "<div class='muted'>Sin auditorias todavia.</div>";
 
 $err  = isset($_GET['err']) ? "<div class='card' style='border-color:#ef4444;color:#fca5a5'>Marca o escribe al menos una web a auditar.</div>" : '';
 $ntfy = htmlspecialchars($settings['ntfy'] ?? '');
+$tgT  = htmlspecialchars($settings['tg_token'] ?? '');
+$tgC  = htmlspecialchars($settings['tg_chat'] ?? '');
+$whk  = htmlspecialchars($settings['webhook'] ?? '');
 
 echo head('Panel', $logo);
 echo <<<HTML
@@ -351,9 +360,12 @@ C:\xampp\htdocs\mi-web
   <form method="post" action="/settings/save">
     <div class="grid">
       <div><label class="f">Topico ntfy.sh</label><input type="text" name="ntfy" value="$ntfy" placeholder="https://ntfy.sh/tu-topico-secreto"></div>
+      <div><label class="f">Telegram bot token</label><input type="text" name="tg_token" value="$tgT" placeholder="123456:ABC-DEF..."></div>
+      <div><label class="f">Telegram chat_id</label><input type="text" name="tg_chat" value="$tgC" placeholder="123456789"></div>
+      <div><label class="f">Webhook (JSON POST)</label><input type="text" name="webhook" value="$whk" placeholder="https://tu-n8n/webhook/..."></div>
     </div>
     <div class="row"><button class="btn sm" type="submit">Guardar</button></div>
-    <div class="note">Crea un topico unico en ntfy.sh, suscribe la app de movil, y CyberShield te enviara push si una auditoria encuentra algo. Gratis y sin cuenta.</div>
+    <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts.</div>
   </form>
 </div>
 
