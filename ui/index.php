@@ -29,6 +29,67 @@ header('X-Content-Type-Options: nosniff');
 
 $readJson = fn($f, $def = []) => json_decode((string) @file_get_contents($f), true) ?: $def;
 
+// ---------- Auth del panel ----------
+// La contrasena se crea la primera vez que entras; cookie firmada HMAC
+// derivada del hash (cambiar la contrasena invalida todas las sesiones).
+$settings  = $readJson($settingsFile);
+$passHash  = (string) ($settings['panel_pass'] ?? '');
+$cookieTok = (string) ($_COOKIE['cs_auth'] ?? '');
+$cookieOk  = $passHash !== '' && hash_equals(hash_hmac('sha256', 'cs-panel', $passHash), $cookieTok);
+$loginErr  = '';
+
+if ($path === '/login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $p = (string) ($_POST['pass'] ?? '');
+    $ok = false;
+    if ($passHash === '') {
+        if (strlen($p) >= 6) {
+            $settings['panel_pass'] = password_hash($p, PASSWORD_DEFAULT);
+            file_put_contents($settingsFile, json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $passHash = $settings['panel_pass'];
+            $ok = true;
+        } else {
+            $loginErr = 'Minimo 6 caracteres.';
+        }
+    } elseif (password_verify($p, $passHash)) {
+        $ok = true;
+    } else {
+        $loginErr = 'Contrasena incorrecta.';
+    }
+    if ($ok) {
+        setcookie('cs_auth', hash_hmac('sha256', 'cs-panel', $passHash), [
+            'expires' => time() + 2592000, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax',
+        ]);
+        header('Location: /');
+        return true;
+    }
+}
+if ($path === '/logout') {
+    setcookie('cs_auth', '', time() - 3600, '/');
+    header('Location: /login');
+    return true;
+}
+if (!$cookieOk) {
+    if ($path !== '/login') { header('Location: /login'); return true; }
+    $isSetup = $passHash === '';
+    $msg = $loginErr ? "<div style='color:#fca5a5;font-size:13px;margin-bottom:10px'>$loginErr</div>" : '';
+    echo "<!DOCTYPE html><html lang='es'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><title>Acceso · CyberShield</title>
+<style>body{background:#0a0e1a;color:#e2e8f0;font-family:'Segoe UI',Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{background:#0f172a;border:1px solid #312e81;border-radius:14px;padding:32px;width:340px}
+h1{font-size:18px;margin:0 0 4px}.sub{color:#818cf8;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:22px}
+input{width:100%;background:#0a0e1a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:11px;font-size:14px;margin-bottom:14px;box-sizing:border-box}
+button{width:100%;background:#6366f1;color:#fff;border:0;border-radius:10px;padding:12px;font-weight:700;cursor:pointer}
+.note{color:#64748b;font-size:12px;margin-top:14px}</style></head><body>
+<form class='card' method='post' action='/login'>
+<h1>🛡️ CyberShield AI</h1><div class='sub'>Orizon Studio · Panel</div>
+$msg
+<input type='password' name='pass' placeholder='" . ($isSetup ? 'Crea la contrasena del panel' : 'Contrasena') . "' autofocus required>
+<button>" . ($isSetup ? 'Crear y entrar' : 'Entrar') . "</button>"
+    . ($isSetup ? "<div class='note'>Primera vez: la contrasena que escribas queda guardada (hash) y sera la del panel.</div>" : '')
+    . "</form></body></html>";
+    return true;
+}
+
 // ---------- API ----------
 if ($path === '/api/status') {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
@@ -89,11 +150,13 @@ if ($path === '/webs/del') {
 
 // ---------- Ajustes ----------
 if ($path === '/settings/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $prev = $readJson($settingsFile); // preserva panel_pass (no va en el form)
     file_put_contents($settingsFile, json_encode([
-        'ntfy'     => trim((string) ($_POST['ntfy'] ?? '')),
-        'tg_token' => trim((string) ($_POST['tg_token'] ?? '')),
-        'tg_chat'  => trim((string) ($_POST['tg_chat'] ?? '')),
-        'webhook'  => trim((string) ($_POST['webhook'] ?? '')),
+        'ntfy'       => trim((string) ($_POST['ntfy'] ?? '')),
+        'tg_token'   => trim((string) ($_POST['tg_token'] ?? '')),
+        'tg_chat'    => trim((string) ($_POST['tg_chat'] ?? '')),
+        'webhook'    => trim((string) ($_POST['webhook'] ?? '')),
+        'panel_pass' => $prev['panel_pass'] ?? '',
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     header('Location: /?ok=ajustes#ajustes');
     return true;
