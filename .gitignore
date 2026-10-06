@@ -9,6 +9,10 @@ composer.lock
 /tools/
 /orizon-servidor.bat
 
+# Borradores locales (contenido ya fusionado en README.md)
+/README-ORIZON-GITHUB.md
+/README-ORIZON-GITHUB.pdf
+
 # Generados por la herramienta en proyectos auditados
 .cybershield-quarantine/
 .cybershield-whitelist

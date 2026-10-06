@@ -10,6 +10,7 @@
  *   cybershield all  <dir> [--profile orizon] [--html salida.html]
  *   cybershield fix  <docroot> [--yes]
  *   cybershield web  <https://url>   Auditoria remota de superficie (HTTP pasivo)
+ *   cybershield ui   [--port 8321]   Panel web local (app de escritorio)
  */
 
 namespace Orizon\CyberShield;
@@ -50,13 +51,31 @@ echo $banner;
 $args = $_SERVER['argv'];
 array_shift($args);
 $mode = array_shift($args) ?? '';
-$target = array_shift($args) ?? '';
+$target = ($mode === 'ui') ? '' : (array_shift($args) ?? '');
 $opts = [];
 for ($i = 0; $i < count($args); $i++) {
     if (strpos($args[$i], '--') === 0) {
         $k = substr($args[$i], 2);
         $opts[$k] = ($i + 1 < count($args) && strpos($args[$i + 1], '--') !== 0) ? $args[++$i] : true;
     }
+}
+
+// ── Panel web local (app): no necesita target ────────────
+if ($mode === 'ui') {
+    $port  = isset($opts['port']) ? max(1, (int) $opts['port']) : 8321;
+    $uiDir = dirname(__DIR__) . '/ui';
+    $url   = "http://127.0.0.1:$port";
+    echo "  Panel CyberShield en $url — Ctrl+C para cerrar\n";
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        pclose(popen('start "" ' . escapeshellarg($url), 'r'));
+    } elseif (PHP_OS === 'Darwin') {
+        exec('open ' . escapeshellarg($url) . ' > /dev/null 2>&1 &');
+    } else {
+        exec('xdg-open ' . escapeshellarg($url) . ' > /dev/null 2>&1 &');
+    }
+    passthru(escapeshellarg(PHP_BINARY) . " -S 127.0.0.1:$port -t "
+        . escapeshellarg($uiDir) . ' ' . escapeshellarg($uiDir . '/index.php'));
+    exit(0);
 }
 
 if (!$mode || !$target || in_array($mode, ['help', '-h', '--help'], true)) {
@@ -66,7 +85,8 @@ if (!$mode || !$target || in_array($mode, ['help', '-h', '--help'], true)) {
     echo "  cybershield sys  <docroot>    Auditoria del servidor (exposicion, instaladores, php.ini)\n";
     echo "  cybershield all  <dir>        Todo lo anterior + informe ejecutivo\n";
     echo "  cybershield fix  <docroot>    REPARA: .htaccess blindado + cuarentena + uploads protegidos\n";
-    echo "  cybershield web  <https://url> Auditoria REMOTA: archivos sensibles y cabeceras desde fuera\n\n";
+    echo "  cybershield web  <https://url> Auditoria REMOTA: archivos sensibles y cabeceras desde fuera\n";
+    echo "  cybershield ui                 Panel web local (audita varias webs con un clic)\n\n";
     echo "Opciones:\n";
     echo "  --profile orizon|wordpress|generic   Stack del proyecto (defecto: orizon)\n";
     echo "  --html <fichero.html>                Informe HTML con marca Orizon\n";
@@ -104,6 +124,15 @@ switch ($mode) {
         $analyzer = new LogAnalyzer();
         $r = $analyzer->analyze($target);
         echo Report::logReport($r);
+        if (isset($opts['json'])) {
+            $lc = array_fill_keys(['critical', 'high', 'medium', 'low', 'info'], 0);
+            foreach ($r['ips'] ?? [] as $info) $lc[$info['severity'] ?? 'low']++;
+            file_put_contents($opts['json'], json_encode([
+                'target' => $target, 'mode' => 'log', 'counts' => $lc,
+                'status' => !empty($r['blocklist']) ? 'ACCION REQUERIDA' : 'SEGURO',
+                'log'    => $r,
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        }
         if (isset($opts['block']) && !empty($r['blocklist'])) {
             file_put_contents($opts['block'], implode("\n", $r['blocklist']) . "\n");
             echo "\n  Lista de bloqueo guardada en {$opts['block']}\n";
@@ -166,4 +195,13 @@ switch ($mode) {
 if (isset($opts['html'])) {
     Report::html($allFindings, $target, $opts['html'], ['files' => 'ver informe']);
     echo "\nInforme HTML guardado en: {$opts['html']}\n";
+}
+if (isset($opts['json'])) {
+    file_put_contents($opts['json'], json_encode([
+        'target'   => $target,
+        'mode'     => $mode,
+        'counts'   => Report::counts($allFindings),
+        'status'   => Report::globalStatus($allFindings),
+        'findings' => $allFindings,
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 }

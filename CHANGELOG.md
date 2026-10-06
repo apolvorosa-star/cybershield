@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 — 2026-10-06
+
+- Nuevo modo `ui`: panel web local (app) para auditar una o varias webs a la
+  vez. `cybershield ui` abre el navegador con un dashboard Orizon, cola de
+  auditorias en segundo plano e informes HTML descargables.
+- Nueva opcion `--json <fichero>`: salida maquina de hallazgos para CI/CD.
+- Fix en `web`: no reporta archivos sensibles cuando la respuesta es una
+  pagina HTML disfrazada (soft-200 sin falsos positivos).
+- `web` sigue el redirect inicial (HTTP→HTTPS) y avisa si falta TLS.
+- Licencia del proyecto: Apache 2.0.
+
 ## 1.1.0 — 2026-10-06
 
 - Nuevo modo `web <url>`: auditoria remota de superficie. Comprueba por HTTP

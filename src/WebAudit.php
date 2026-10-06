@@ -30,7 +30,7 @@ class WebAudit
         '/.svn/entries'        => ['medium',   '/^\d/'],
         '/composer.json'       => ['medium',   '/"(name|require)"/'],
         '/composer.lock'       => ['low',      '/"packages"/'],
-        '/.htpasswd'           => ['high',     '/^[\w.-]+:/m'],
+        '/.htpasswd'           => ['high',     '/^[\w.-]+:[^\s<]{5,}/m'],
         '/.htaccess'           => ['low',      '/(RewriteRule|Require|Deny|Order|Options)/i'],
         '/web.config'          => ['low',      '/<configuration/i'],
         '/config.php.bak'      => ['high',     '/<\?php|\$|DB_/i'],
@@ -86,6 +86,10 @@ class WebAudit
             $r = $this->request($this->base . $path);
             $this->testedPaths++;
             if ($r['status'] !== 200 || $r['body'] === '') continue;
+            // La respuesta es un documento HTML -> es una portada/404 disfrazada,
+            // no el archivo (salvo phpinfo/server-status, que SI son HTML legitimo)
+            $looksHtml = (bool) preg_match('/<!DOCTYPE html|<html[\s>]/i', $r['body']);
+            if ($looksHtml && !in_array($path, ['/phpinfo.php', '/info.php', '/server-status'], true)) continue;
             if (!preg_match($verify, $r['body'])) continue; // 200 suave / pagina de error custom
             $this->reportExposed($path, $sev);
         }

@@ -27,12 +27,14 @@ echo    3) Solo auditoria de codigo
 echo    4) Solo auditoria de servidor/docroot
 echo    5) Abrir ultimo informe HTML
 echo    6) REPARAR proyecto (htaccess + cuarentena)
+echo    7) Panel web (app): auditar varias webs con un clic
 echo    0) Salir
 echo.
 set /p "OP=  Elige opcion: "
 
 if "%OP%"=="0" exit /b 0
 if "%OP%"=="5" goto :openreport
+if "%OP%"=="7" goto :panel
 
 set /p "TARGET=  Ruta del proyecto o fichero de log: "
 if "%TARGET%"=="" goto :menu
@@ -54,6 +56,10 @@ if exist "%REPORT%" (
     if /i not "!OPEN!"=="n" start "" "%REPORT%"
 )
 pause
+goto :menu
+
+:panel
+"%PHP%" "%~dp0cybershield.php" ui
 goto :menu
 
 :openreport

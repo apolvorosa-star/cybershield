@@ -2,7 +2,7 @@
     "name": "orizon/cybershield",
     "description": "Auditor de seguridad defensiva para PHP/MySQL: analisis estatico OWASP (SQLi, XSS, CSRF), access logs y docroot. Sin dependencias, con informe ejecutivo y HTML.",
     "type": "library",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": [
         "security", "cybersecurity", "audit", "owasp", "pentest",
         "sql-injection", "xss", "csrf", "wordpress", "static-analysis",

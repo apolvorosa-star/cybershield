@@ -1,91 +1,131 @@
 ![CyberShield AI](assets/cover.jpg)
 
-# CyberShield AI — Orizon Studio
+# 🛡️ CyberShield AI — by Orizon Studio
 
-Auditor de ciberseguridad **defensivo** para PHP/MySQL. Sin dependencias: corre con cualquier PHP 8+.
+**El antivirus para webs PHP/MySQL que las agencias estaban esperando.**
+Hecho en Valencia, para proteger webs de verdad.
 
 [![Latest Version](https://img.shields.io/packagist/v/orizon/cybershield.svg)](https://packagist.org/packages/orizon/cybershield)
-[![License](https://img.shields.io/packagist/l/orizon/cybershield.svg)](LICENSE)
-[![PHP](https://img.shields.io/packagist/php-v/orizon/cybershield.svg)](https://packagist.org/packages/orizon/cybershield)
+[![License](https://img.shields.io/badge/licencia-Apache%202.0-blue)](LICENSE)
+[![PHP](https://img.shields.io/badge/php-%3E%3D8.0-777bb3)](https://packagist.org/packages/orizon/cybershield)
+[![Hecho en](https://img.shields.io/badge/hecho%20en-Valencia%20%F0%9F%8D%8A-orange)](https://github.com/apolvorosa-star/cybershield)
 
-![Orizon Studio](assets/logo.jpg)
+> Auditoría OWASP (SQLi, XSS, CSRF) + Análisis de logs + Auditoría de servidor + Auditoría remota por URL + Reparación automática + Panel web + Informe PRO con marca Orizon.
 
-## Instalación
+## ¿Qué es esto?
+
+No es otro escáner. CyberShield es lo que uso en Orizon Studio para auditar las webs de mis clientes antes de entregarlas, y ahora lo abro para que cualquiera que necesite proteger su web lo pueda usar.
+
+**Si tienes una web en PHP, WordPress, Laravel o a medida, esto te dice en 30 segundos si te pueden hackear.**
+
+Sin dependencias: corre con cualquier PHP 8+, en Windows, Linux o Mac.
+
+## 🚀 Instalación
 
 ```bash
+# Opción 1 — Como herramienta de tu proyecto
 composer require --dev orizon/cybershield
-```
+php vendor/bin/cybershield all ./mi-web
 
-O de forma global, disponible en cualquier proyecto:
-
-```bash
+# Opción 2 — Global, disponible en cualquier sitio
 composer global require orizon/cybershield
+
+# Opción 3 — Sin Composer: clonar y listo (cero dependencias)
+git clone https://github.com/apolvorosa-star/cybershield.git
+cd cybershield
+php cybershield.php all ./mi-web        # Windows: cybershield.bat (menú interactivo)
 ```
 
-También funciona **sin Composer**: clona el repo y ejecuta `php cybershield.php ...`
-(o `cybershield.bat` en Windows/XAMPP) — la herramienta no tiene dependencias.
-
-## Uso
+## 🖥️ Panel web (app de escritorio)
 
 ```bash
-php vendor/bin/cybershield all  ./mi-web
-php vendor/bin/cybershield code ./mi-web --profile wordpress --html informe.html
-php vendor/bin/cybershield log  /var/log/apache2/access.log --block bloquear.txt
-php vendor/bin/cybershield sys  ./mi-web --ini /etc/php/8.3/apache2/php.ini
-php vendor/bin/cybershield fix  ./mi-web --yes
-php vendor/bin/cybershield web  https://mi-dominio.com
+cybershield ui
 ```
 
-| Modo | Comando | Qué hace |
-|---|---|---|
-| **Código** | `code` | Análisis estático OWASP con rastreo de taint: inyección SQL, XSS, CSRF, sanitización, control de acceso, `eval`, includes dinámicos, `unserialize`, subidas, secretos hardcodeados |
-| **Incidentes** | `log` | Procesa access logs de Apache/Nginx: detecta SQLi, traversal, RCE, fuerza bruta y scanners → gravedad + reglas de bloqueo de IP listas para `.htaccess` |
-| **Servidor** | `sys` | `.env`, `.sql`, `.git`, `install.php` expuestos; carpetas de subida sin protección; `php.ini` inseguro |
-| **Todo** | `all` | `code` + `sys` + informe ejecutivo |
-| **Reparar** | `fix` | `.htaccess` blindado, cuarentena reversible (`.cybershield-quarantine/`) y uploads sin ejecución PHP |
-| **Remoto** | `web` | Auditoría desde fuera contra una URL pública: `.env`, `.git`, `*.sql` y backups accesibles por HTTP + cabeceras de seguridad (solo GETs de lectura, sin exploits) |
+Abre un panel local en `http://127.0.0.1:8321`: pega **una o varias webs**
+(una por línea), dale a *Auditar* y mira los resultados en vivo con sus
+informes HTML descargables. Solo escucha en tu PC — no es un servicio público.
 
-## Perfiles
+## ⚡ Los 7 modos
+
+```bash
+cybershield code <dir>          → Revisa tu código: SQLi, XSS, CSRF, eval, secretos...
+cybershield sys  <docroot>      → .env, .git, backups e instaladores expuestos
+cybershield all  <dir>          → code + sys + informe ejecutivo
+cybershield web  <https://...>  → Auditoria REMOTA: lo que un atacante vería desde fuera
+cybershield log  <access.log>   → IPs atacantes + reglas de bloqueo listas
+cybershield fix  <docroot>      → ¡REPARA! .htaccess blindado + cuarentena + uploads
+cybershield ui                  → Panel web para auditar varias webs con un clic
+```
+
+| Modo | Qué hace |
+|---|---|
+| **Código** `code` | Análisis estático OWASP con rastreo de taint: inyección SQL, XSS, CSRF, sanitización, control de acceso, `eval`, includes dinámicos, `unserialize`, subidas, secretos hardcodeados |
+| **Servidor** `sys` | `.env`, `.sql`, `.git`, `install.php` expuestos; carpetas de subida sin protección; `php.ini` inseguro |
+| **Remoto** `web` | Comprueba por HTTP si `.env`, `.git`, `composer.json`, backups y `phpinfo.php` son accesibles desde Internet + cabeceras de seguridad (solo GETs pasivos, sin exploits) |
+| **Incidentes** `log` | Access logs de Apache/Nginx: SQLi, traversal, RCE, fuerza bruta y scanners → gravedad + lista de IPs a bloquear (`--block`) |
+| **Todo** `all` | `code` + `sys` + informe ejecutivo |
+| **Reparar** `fix` | `.htaccess` blindado, cuarentena reversible en `.cybershield-quarantine/` y uploads sin ejecución PHP |
+| **Panel** `ui` | App web local: cola de auditorías multi-web, resultados en vivo, historial de informes |
+
+## 🧠 Perfiles
 
 El perfil define qué funciones se consideran saneo/CSRF/permisos en cada stack:
 
-- `orizon` — OrizonCMS: `e()`, `orizon_can()`, PDO, CSRF propio *(defecto)*
+- `orizon` — OrizonCMS: `e()`, `orizon_can()`, PDO *(defecto)*
 - `wordpress` — `$wpdb->prepare()`, `esc_*()`, nonces, `current_user_can()`
 - `generic` — PHP puro: solo funciones nativas
 
-## Salida
+```bash
+php vendor/bin/cybershield code ./mi-proyecto --profile wordpress --html informe.html
+```
+
+## 📊 Salida
 
 - **Informe técnico**: archivo:línea, riesgo en 2 frases, fix listo para copiar
 - **Informe ejecutivo**: formato 🛡️ Estado / 📊 Resumen / 🔧 Acción / 💡 Recomendación
-- **HTML** (`--html`): informe con marca Orizon para entregar al cliente
+- **HTML** (`--html`): informe oscuro profesional con marca Orizon, listo para enviar al cliente
+- **JSON** (`--json`): salida máquina para CI/CD o integraciones
 
-## Lista blanca de cuarentena
+## 🛡️ Lista blanca de cuarentena
 
-El modo `fix` respeta exclusiones definidas en:
-
-1. `whitelist.txt` en la raíz del paquete (copia `whitelist.dist.txt` como plantilla)
-2. `.cybershield-whitelist` en el docroot auditado
-
-Formato: una ruta relativa por línea, comodines `*` admitidos, o
-`C:/ruta/al/docroot|ruta/relativa` para limitarla a un proyecto.
-
-## En Windows / XAMPP
-
-`cybershield.bat` (incluido en el repo) resuelve el PHP de XAMPP solo y ofrece
-un menú interactivo con doble clic. Ideal para auditorías programadas con el
-Programador de tareas.
+El modo `fix` respeta exclusiones en `whitelist.txt` (copia `whitelist.dist.txt`
+como plantilla) o `.cybershield-whitelist` dentro del docroot auditado.
 
 ## Seguridad y límites
 
-Herramienta **exclusivamente defensiva**: audita código estático, logs y
-exposición de archivos. No genera exploits ni ejecuta ataques. El escáner es
-la primera pasada — confirma los hallazgos a mano antes de declarar una
-vulnerabilidad.
+Herramienta **exclusivamente defensiva**: análisis estático, logs, exposición de
+archivos y comprobaciones HTTP pasivas. No genera exploits ni ejecuta ataques.
+El escáner es la primera pasada — confirma los hallazgos antes de declarar una
+vulnerabilidad. Audita solo sistemas tuyos o con permiso del propietario.
+
+## 💼 ¿Para quién es?
+
+- **Agencias web** que quieren entregar webs seguras y cobrar la auditoría
+- **Freelancers** hartos de que les hackeen WordPress
+- **Pymes** que quieren saber si su web es segura
+
+## 💰 Visión Orizon Studio
+
+Este es el paso 1. La visión es grande:
+
+1. **Hoy:** herramienta gratuita y open-source para la comunidad
+2. **Próximamente:** CyberShield PRO — auditoría diaria automática
+3. **Futuro:** suite completa Orizon Security
+
+> "Siempre mi ambición es de negocio y ganar dinero y crecer como los grandes" — Orizon Studio
+
+## 🤝 ¿Quieres que te auditemos tu web?
+
+Si no quieres instalar nada, en Orizon Studio auditamos tu web y te entregamos
+el informe PRO con sello y plan de corrección.
+
+**Contacto:** Orizon Studio — Valencia · Instagram: [@orizonstudio2026](https://instagram.com/orizonstudio2026)
 
 ## Licencia
 
-MIT © Orizon Studio
+[Apache 2.0](LICENSE) — úsalo, modifícalo, gana dinero con él. Solo mantén el crédito a Orizon Studio.
 
 ---
 
-*Orizon Studio — herramientas defensivas. Nunca uses esta herramienta para atacar sistemas que no sean tuyos.*
+*Hecho con ❤️ y muchas noches sin dormir en Valencia. Si te sirve, deja una ⭐ en GitHub y nos ayudas a crecer.*
