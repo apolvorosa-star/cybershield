@@ -9,6 +9,7 @@
  *   cybershield sys  <docroot> [--ini php.ini]
  *   cybershield all  <dir> [--profile orizon] [--html salida.html]
  *   cybershield fix  <docroot> [--yes]
+ *   cybershield web  <https://url>   Auditoria remota de superficie (HTTP pasivo)
  */
 
 namespace Orizon\CyberShield;
@@ -64,7 +65,8 @@ if (!$mode || !$target || in_array($mode, ['help', '-h', '--help'], true)) {
     echo "  cybershield log  <access.log> Analisis de incidentes + reglas de bloqueo de IP\n";
     echo "  cybershield sys  <docroot>    Auditoria del servidor (exposicion, instaladores, php.ini)\n";
     echo "  cybershield all  <dir>        Todo lo anterior + informe ejecutivo\n";
-    echo "  cybershield fix  <docroot>    REPARA: .htaccess blindado + cuarentena + uploads protegidos\n\n";
+    echo "  cybershield fix  <docroot>    REPARA: .htaccess blindado + cuarentena + uploads protegidos\n";
+    echo "  cybershield web  <https://url> Auditoria REMOTA: archivos sensibles y cabeceras desde fuera\n\n";
     echo "Opciones:\n";
     echo "  --profile orizon|wordpress|generic   Stack del proyecto (defecto: orizon)\n";
     echo "  --html <fichero.html>                Informe HTML con marca Orizon\n";
@@ -120,6 +122,20 @@ switch ($mode) {
         echo "\n  Nota: los fallos de CODIGO (XSS/SQLi/CSRF) no se reparan\n";
         echo "  automaticamente — corrigelos uno a uno con el fix del informe.\n";
         exit(0);
+
+    case 'web':
+        if (!preg_match('#^https?://#i', $target)) {
+            fwrite(STDERR, "El modo web necesita una URL: cybershield web https://tudominio.com\n");
+            exit(1);
+        }
+        echo "  Auditoria remota de superficie (solo GETs de lectura)…\n";
+        $web = new WebAudit();
+        $findings = $web->audit($target);
+        echo "  Rutas sensibles probadas: {$web->testedPaths}\n";
+        echo Report::text($findings, $target);
+        echo Report::executive($findings, ['files' => $web->testedPaths . ' rutas + cabeceras HTTP']);
+        $allFindings = $findings;
+        break;
 
     case 'sys':
         if (!is_dir($target)) { fwrite(STDERR, "No es un directorio: $target\n"); exit(1); }

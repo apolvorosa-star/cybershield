@@ -33,6 +33,7 @@ php vendor/bin/cybershield code ./mi-web --profile wordpress --html informe.html
 php vendor/bin/cybershield log  /var/log/apache2/access.log --block bloquear.txt
 php vendor/bin/cybershield sys  ./mi-web --ini /etc/php/8.3/apache2/php.ini
 php vendor/bin/cybershield fix  ./mi-web --yes
+php vendor/bin/cybershield web  https://mi-dominio.com
 ```
 
 | Modo | Comando | Qué hace |
@@ -42,6 +43,7 @@ php vendor/bin/cybershield fix  ./mi-web --yes
 | **Servidor** | `sys` | `.env`, `.sql`, `.git`, `install.php` expuestos; carpetas de subida sin protección; `php.ini` inseguro |
 | **Todo** | `all` | `code` + `sys` + informe ejecutivo |
 | **Reparar** | `fix` | `.htaccess` blindado, cuarentena reversible (`.cybershield-quarantine/`) y uploads sin ejecución PHP |
+| **Remoto** | `web` | Auditoría desde fuera contra una URL pública: `.env`, `.git`, `*.sql` y backups accesibles por HTTP + cabeceras de seguridad (solo GETs de lectura, sin exploits) |
 
 ## Perfiles
 
