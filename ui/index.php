@@ -77,13 +77,17 @@ if (!$cookieOk) {
 <style>body{background:#0a0e1a;color:#e2e8f0;font-family:'Segoe UI',Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 .card{background:#0f172a;border:1px solid #312e81;border-radius:14px;padding:32px;width:340px}
 h1{font-size:18px;margin:0 0 4px}.sub{color:#818cf8;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:22px}
-input{width:100%;background:#0a0e1a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:11px;font-size:14px;margin-bottom:14px;box-sizing:border-box}
+input{width:100%;background:#0a0e1a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:11px;padding-right:42px;font-size:14px;box-sizing:border-box}
 button{width:100%;background:#6366f1;color:#fff;border:0;border-radius:10px;padding:12px;font-weight:700;cursor:pointer}
+.pwrap{position:relative;margin-bottom:14px}
+.eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;color:#64748b;font-size:17px;cursor:pointer;padding:2px 6px;width:auto}
+.eye:hover{color:#a5b4fc}
 .note{color:#64748b;font-size:12px;margin-top:14px}</style></head><body>
 <form class='card' method='post' action='/login'>
 <h1>🛡️ CyberShield AI</h1><div class='sub'>Orizon Studio · Panel</div>
 $msg
-<input type='password' name='pass' placeholder='" . ($isSetup ? 'Crea la contrasena del panel' : 'Contrasena') . "' autofocus required>
+<div class='pwrap'><input type='password' name='pass' id='pw' placeholder='" . ($isSetup ? 'Crea la contrasena del panel' : 'Contrasena') . "' autofocus required>
+<button type='button' class='eye' onclick='var i=document.getElementById(\"pw\");i.type=i.type===\"password\"?\"text\":\"password\";this.textContent=i.type===\"password\"?\"\\u{1F441}\":\"\\u{1F576}\"'>👁</button></div>
 <button>" . ($isSetup ? 'Crear y entrar' : 'Entrar') . "</button>"
     . ($isSetup ? "<div class='note'>Primera vez: la contrasena que escribas queda guardada (hash) y sera la del panel.</div>" : '')
     . "</form></body></html>";
