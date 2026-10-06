@@ -63,8 +63,13 @@ for ($i = 0; $i < count($args); $i++) {
 // ── Panel web local (app): no necesita target ────────────
 if ($mode === 'ui') {
     $port  = isset($opts['port']) ? max(1, (int) $opts['port']) : 8321;
+    $host  = isset($opts['host']) ? (string) $opts['host'] : '127.0.0.1';
     $uiDir = dirname(__DIR__) . '/ui';
-    $url   = "http://127.0.0.1:$port";
+    if ($host !== '127.0.0.1' && $host !== 'localhost') {
+        echo "  ⚠️  --host $host expone el panel a la red. Usa solo en tu LAN de confianza\n";
+        echo "      o mejor: accede por tu tunel HTTPS. Sin auth — quien llegue al puerto lo usa.\n";
+    }
+    $url = "http://" . ($host === '0.0.0.0' ? '127.0.0.1' : $host) . ":$port";
     echo "  Panel CyberShield en $url — Ctrl+C para cerrar\n";
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
         pclose(popen('start "" ' . escapeshellarg($url), 'r'));
@@ -73,7 +78,7 @@ if ($mode === 'ui') {
     } else {
         exec('xdg-open ' . escapeshellarg($url) . ' > /dev/null 2>&1 &');
     }
-    passthru(escapeshellarg(PHP_BINARY) . " -S 127.0.0.1:$port -t "
+    passthru(escapeshellarg(PHP_BINARY) . " -S $host:$port -t "
         . escapeshellarg($uiDir) . ' ' . escapeshellarg($uiDir . '/index.php'));
     exit(0);
 }

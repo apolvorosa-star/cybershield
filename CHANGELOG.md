@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0 — 2026-10-06
+
+- **Agente remoto autocontenido** (`AgentBuilder` + `RemoteAudit`): un unico
+  PHP con token que se sube al servidor, audita su propio docroot (codigo +
+  sistema) y se autodestruye. Via SSH (scp+CLI, nada expuesto por HTTP) o
+  FTP (subir → ejecutar por HTTPS con token → borrar).
+- **Panel**: fichas de webs con credenciales de servidor (URL/FTP/SSH +
+  docroot), checkbox para auditar guardadas junto a objetivos sueltos.
+- **Alertas**: registro en el panel de todo hallazgo no-SEGURO + push
+  opcional al movil via ntfy.sh.
+- **Movil**: PWA instalable (manifest + service worker) y `--host 0.0.0.0`
+  para acceder desde el telefono en la misma Wi-Fi.
+- `--json` tambien en modo `log`.
+
 ## 1.2.0 — 2026-10-06
 
 - Nuevo modo `ui`: panel web local (app) para auditar una o varias webs a la

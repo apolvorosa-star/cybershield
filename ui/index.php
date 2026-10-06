@@ -1,8 +1,9 @@
 <?php
 /**
  * CyberShield UI — panel local (router para "php -S").
- * Todo el panel vive aqui: formulario, cola de auditorias e informes.
- * Solo escucha en 127.0.0.1 — es una app local, no un servicio publico.
+ * Formulario multi-web, fichas de servidores (FTP/SSH), cola de
+ * auditorias en segundo plano, alertas e informes.
+ * Solo escucha en localhost/LAN — es una app local, no un servicio publico.
  */
 
 $root     = dirname(__DIR__);
@@ -11,16 +12,21 @@ if (!is_dir($jobsRoot) && !@mkdir($jobsRoot, 0777, true)) {
     $jobsRoot = sys_get_temp_dir() . '/cybershield-ui';
     if (!is_dir($jobsRoot)) @mkdir($jobsRoot, 0777, true);
 }
+$websFile     = $jobsRoot . '/webs.json';
+$alertsFile   = $jobsRoot . '/alerts.json';
+$settingsFile = $jobsRoot . '/settings.json';
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
 
-// Estaticos dentro de ui/ se sirven tal cual
+// Estaticos dentro de ui/ se sirven tal cual (manifest, sw.js)
 if ($path !== '/' && is_file(__DIR__ . $path)) return false;
 
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 
-// ---------- API: estado de un job (polling JS) ----------
+$readJson = fn($f, $def = []) => json_decode((string) @file_get_contents($f), true) ?: $def;
+
+// ---------- API ----------
 if ($path === '/api/status') {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
     $f  = "$jobsRoot/$id/status.json";
@@ -29,7 +35,16 @@ if ($path === '/api/status') {
     return true;
 }
 
-// ---------- Ver informe / salida de consola ----------
+// ---------- Logo (icono PWA) ----------
+if ($path === '/logo') {
+    $f = $root . '/assets/logo.jpg';
+    if (!is_file($f)) { http_response_code(404); return true; }
+    header('Content-Type: image/jpeg');
+    readfile($f);
+    return true;
+}
+
+// ---------- Informe / salida ----------
 if ($path === '/report') {
     $id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
     $file = basename($_GET['f'] ?? '');
@@ -41,6 +56,50 @@ if ($path === '/report') {
     return true;
 }
 
+// ---------- Guardar web (ficha de servidor) ----------
+if ($path === '/webs/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $webs = $readJson($websFile);
+    $webs[] = [
+        'id'      => bin2hex(random_bytes(4)),
+        'name'    => trim((string) ($_POST['name'] ?? '')) ?: ($_POST['url'] ?? 'web'),
+        'url'     => trim((string) ($_POST['url'] ?? '')),
+        'access'  => in_array($_POST['access'] ?? 'url', ['url', 'ftp', 'ssh'], true) ? $_POST['access'] : 'url',
+        'host'    => trim((string) ($_POST['host'] ?? '')),
+        'port'    => trim((string) ($_POST['port'] ?? '')),
+        'user'    => trim((string) ($_POST['user'] ?? '')),
+        'pass'    => (string) ($_POST['pass'] ?? ''),
+        'key'     => trim((string) ($_POST['key'] ?? '')),
+        'docroot' => trim((string) ($_POST['docroot'] ?? '')),
+    ];
+    file_put_contents($websFile, json_encode($webs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    header('Location: /#webs');
+    return true;
+}
+
+if ($path === '/webs/del') {
+    $id   = $_GET['id'] ?? '';
+    $webs = array_values(array_filter($readJson($websFile), fn($w) => $w['id'] !== $id));
+    file_put_contents($websFile, json_encode($webs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    header('Location: /#webs');
+    return true;
+}
+
+// ---------- Ajustes ----------
+if ($path === '/settings/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    file_put_contents($settingsFile, json_encode([
+        'ntfy' => trim((string) ($_POST['ntfy'] ?? '')),
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    header('Location: /#ajustes');
+    return true;
+}
+
+// ---------- Alertas ----------
+if ($path === '/alerts/clear') {
+    file_put_contents($alertsFile, '[]');
+    header('Location: /#alertas');
+    return true;
+}
+
 // ---------- Lanzar auditoria ----------
 if ($path === '/run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw     = trim((string) ($_POST['targets'] ?? ''));
@@ -48,25 +107,44 @@ if ($path === '/run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $profile = in_array($_POST['profile'] ?? 'orizon', ['orizon', 'wordpress', 'generic'], true)
         ? $_POST['profile'] : 'orizon';
     $wantHtml = isset($_POST['html']);
+    $saved    = $_POST['webs'] ?? [];
+    if (!is_array($saved)) $saved = [$saved];
 
-    if (!$targets) { header('Location: /?err=1'); return true; }
-
-    $id     = date('Ymd-His') . '-' . bin2hex(random_bytes(3));
-    $jobDir = "$jobsRoot/$id";
-    mkdir($jobDir, 0777, true);
-
+    $webs = $readJson($websFile);
     $list = [];
+
     foreach ($targets as $t) {
         $mode = preg_match('#^https?://#i', $t) ? 'web'
               : (preg_match('/\.log$/i', $t) ? 'log' : 'all');
         $list[] = ['target' => $t, 'mode' => $mode];
     }
+    foreach ($saved as $wid) {
+        foreach ($webs as $w) {
+            if ($w['id'] !== $wid) continue;
+            if ($w['access'] === 'url') {
+                $list[] = ['target' => $w['url'], 'mode' => 'web'];
+            } else {
+                $list[] = [
+                    'target' => $w['url'] ?: $w['host'],
+                    'mode'   => 'agent-' . $w['access'],
+                    'conn'   => [
+                        'host' => $w['host'], 'port' => $w['port'], 'user' => $w['user'],
+                        'pass' => $w['pass'], 'key'  => $w['key'],  'docroot' => $w['docroot'],
+                    ],
+                ];
+            }
+        }
+    }
+    if (!$list) { header('Location: /?err=1'); return true; }
+
+    $id     = date('Ymd-His') . '-' . bin2hex(random_bytes(3));
+    $jobDir = "$jobsRoot/$id";
+    mkdir($jobDir, 0777, true);
     file_put_contents("$jobDir/job.json", json_encode([
         'id' => $id, 'profile' => $profile, 'html' => $wantHtml, 'targets' => $list,
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     file_put_contents("$jobDir/status.json", json_encode(['state' => 'queued', 'targets' => []]));
 
-    // Worker en segundo plano (la peticion vuelve al instante)
     $worker = $root . '/ui/worker.php';
     $log    = $jobDir . '/worker.log';
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
@@ -90,6 +168,8 @@ function head(string $title, string $logo): string
     return <<<HTML
 <!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0a0e1a">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>$title · CyberShield</title>
 <style>
 *{box-sizing:border-box}body{background:#0a0e1a;color:#e2e8f0;font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:24px}
@@ -99,20 +179,26 @@ function head(string $title, string $logo): string
 h1{margin:0;font-size:20px;letter-spacing:1px}.sub{color:#818cf8;font-size:11px;letter-spacing:2px;text-transform:uppercase}
 .card{background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:22px;margin-bottom:18px}
 h2{margin:0 0 14px;font-size:15px;color:#a5b4fc;text-transform:uppercase;letter-spacing:1px}
-textarea{width:100%;min-height:110px;background:#0a0e1a;border:1px solid #334155;border-radius:10px;color:#e2e8f0;padding:12px;font-family:Consolas,monospace;font-size:13px;resize:vertical}
-select{background:#0a0e1a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:8px 10px}
+textarea,input[type=text],input[type=password],select{width:100%;background:#0a0e1a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;padding:9px 11px;font-size:13px}
+textarea{min-height:96px;font-family:Consolas,monospace;resize:vertical}
 .row{display:flex;gap:14px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px}
 .btn{background:#6366f1;color:#fff;border:0;border-radius:10px;padding:11px 26px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.5px}
 .btn:hover{background:#818cf8}
+.btn.sm{padding:7px 14px;font-size:12.5px}
 label.chk{display:flex;gap:8px;align-items:center;color:#94a3b8;font-size:13px;cursor:pointer}
+label.f{display:block;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px}
 .job{border:1px solid #1e293b;border-radius:10px;padding:12px 16px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px}
 .job a{color:#a5b4fc;text-decoration:none}.job a:hover{text-decoration:underline}
 .muted{color:#64748b;font-size:12px}
+.web{border:1px solid #1e293b;border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.web .nm{font-weight:700}.web .ur{color:#94a3b8;font-size:12px;font-family:Consolas,monospace}
 .tcard{border:1px solid #1e293b;border-radius:12px;padding:16px;margin-bottom:12px;background:#0a0e1a}
 .tcard .tgt{font-family:Consolas,monospace;color:#a5b4fc;font-size:13px;word-break:break-all}
 .badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;text-transform:uppercase}
 .b-web{background:#312e81;color:#c7d2fe}.b-all{background:#134e4a;color:#99f6e4}.b-log{background:#713f12;color:#fde68a}
 .b-code{background:#1e3a5f;color:#93c5fd}.b-sys{background:#3b0764;color:#d8b4fe}
+.b-agent-ssh,.b-agent-ftp{background:#7c2d12;color:#fdba74}
 .st-queued{color:#94a3b8}.st-running{color:#f59e0b}.st-done{color:#22c55e}.st-error{color:#ef4444}
 .pills{font-size:15px;letter-spacing:1px;margin-top:8px}
 .status-big{font-weight:700;margin-top:6px}
@@ -120,6 +206,9 @@ label.chk{display:flex;gap:8px;align-items:center;color:#94a3b8;font-size:13px;c
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px;animation:p 1s infinite}
 @keyframes p{50%{opacity:.3}}
 .ok{color:#22c55e}.warn{color:#f59e0b}.bad{color:#ef4444}
+.alert{border:1px solid #7f1d1d;background:#1a0f14;border-radius:10px;padding:10px 14px;margin-bottom:8px;font-size:13px}
+.del{color:#f87171;font-size:12px;text-decoration:none}.del:hover{text-decoration:underline}
+.note{color:#64748b;font-size:11.5px;margin-top:4px}
 </style></head><body><div class="wrap">
 <div class="head"><img src="$logo" alt=""><div><h1>🛡️ CyberShield AI</h1><div class="sub">Orizon Studio · Panel de Auditoria</div></div></div>
 HTML;
@@ -144,17 +233,18 @@ const stCls = {queued:'st-queued',running:'st-running',done:'st-done',error:'st-
 function render(s){
   const el = document.getElementById('targets');
   el.innerHTML = (s.targets||[]).map(t=>{
-    let pills='',big='',links='';
+    let pills='',big='',links='',note='';
     if(t.counts){pills='<div class="pills">'+sev.map(k=>icon[k]+' '+(t.counts[k]||0)).join(' &nbsp;')+'</div>';}
     if(t.status){const cls=t.status==='SEGURO'?'ok':(t.status==='AMENAZA DETECTADA'?'bad':'warn');
       big='<div class="status-big '+cls+'">🛡️ '+t.status+'</div>';}
+    if(t.note)note='<div class="note">'+t.note+'</div>';
     if(t.html)links+='<a href="/report?id='+id+'&f='+t.html+'" target="_blank">📄 Informe HTML</a>';
     if(t.txt)links+='<a href="/report?id='+id+'&f='+t.txt+'" target="_blank">🖥️ Salida consola</a>';
     const run=t.state==='running'?'<span class="dot"></span>':'';
     return '<div class="tcard"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">'
       +'<div><span class="badge b-'+t.mode+'">'+t.mode+'</span> <span class="tgt">'+t.target+'</span></div>'
       +'<span class="'+stCls[t.state]+'">'+run+stName[t.state]+'</span></div>'
-      +pills+big+(links?'<div class="links">'+links+'</div>':'')+'</div>';
+      +pills+big+note+(links?'<div class="links">'+links+'</div>':'')+'</div>';
   }).join('');
 }
 async function poll(){
@@ -168,7 +258,30 @@ HTML;
 }
 
 // ---------- Dashboard ----------
-$jobs = array_values(array_filter(scandir($jobsRoot) ?: [], fn($d) => $d[0] !== '.'));
+$webs     = $readJson($websFile);
+$alerts   = array_reverse($readJson($alertsFile));
+$settings = $readJson($settingsFile);
+
+$websHtml = '';
+foreach ($webs as $w) {
+    $acc = strtoupper($w['access']);
+    $websHtml .= "<div class='web'><label class='chk'><input type='checkbox' name='webs[]' value='{$w['id']}' checked>"
+        . "<span><span class='nm'>{$w['name']}</span> <span class='ur'>{$w['url']}</span> "
+        . "<span class='badge b-" . ($w['access'] === 'url' ? 'web' : 'agent-ssh') . "'>$acc</span></span></label>"
+        . "<a class='del' href='/webs/del?id={$w['id']}'>borrar</a></div>";
+}
+if (!$websHtml) $websHtml = "<div class='muted'>Sin webs guardadas. Anade una abajo con sus datos de servidor.</div>";
+
+$alertsHtml = '';
+foreach (array_slice($alerts, 0, 10) as $a) {
+    $c = $a['counts'] ?? [];
+    $alertsHtml .= "<div class='alert'>⚠️ <b>{$a['status']}</b> — {$a['target']} "
+        . "<span class='muted'>{$a['time']} · 🔴{$c['critical']} 🟠{$c['high']} 🟡{$c['medium']}</span></div>";
+}
+if ($alertsHtml) $alertsHtml .= "<a class='del' href='/alerts/clear'>limpiar alertas</a>";
+else $alertsHtml = "<div class='muted'>Sin alertas. Cuando una auditoria encuentre algo sospechoso, aparecera aqui.</div>";
+
+$jobs = array_values(array_filter(scandir($jobsRoot) ?: [], fn($d) => $d[0] !== '.' && is_dir("$jobsRoot/$d")));
 rsort($jobs);
 $jobsHtml = '';
 foreach (array_slice($jobs, 0, 20) as $d) {
@@ -178,34 +291,74 @@ foreach (array_slice($jobs, 0, 20) as $d) {
     $cls = $state === 'done' ? 'ok' : ($state === 'running' || $state === 'queued' ? 'warn' : 'bad');
     $jobsHtml .= "<div class='job'><div><a href='/job?id=$d'>$d</a> <span class='muted'>· $n objetivo(s)</span></div><span class='$cls'>$state</span></div>";
 }
-if (!$jobsHtml) $jobsHtml = "<div class='muted'>Sin auditorias todavia. Lanza la primera arriba.</div>";
+if (!$jobsHtml) $jobsHtml = "<div class='muted'>Sin auditorias todavia.</div>";
 
-$err = isset($_GET['err']) ? "<div class='card' style='border-color:#ef4444;color:#fca5a5'>Escribe al menos una web o ruta a auditar.</div>" : '';
+$err  = isset($_GET['err']) ? "<div class='card' style='border-color:#ef4444;color:#fca5a5'>Marca o escribe al menos una web a auditar.</div>" : '';
+$ntfy = htmlspecialchars($settings['ntfy'] ?? '');
 
 echo head('Panel', $logo);
 echo <<<HTML
+<div class="card" id="alertas">
+  <h2>🔔 Alertas</h2>$alertsHtml
+</div>
+
 <div class="card">
   <h2>Nueva auditoria</h2>
   <form method="post" action="/run">
-    <textarea name="targets" placeholder="Una por linea (webs, carpetas o logs):
-https://mi-dominio.com
-https://otraweb.com
+    <div class="muted" style="margin-bottom:8px">Webs guardadas (usa los datos del servidor para auditar DENTRO):</div>
+    $websHtml
+    <div class="muted" style="margin:14px 0 8px">O pega objetivos sueltos (uno por linea):</div>
+    <textarea name="targets" placeholder="https://mi-dominio.com
 C:\xampp\htdocs\mi-web
 /var/log/apache2/access.log"></textarea>
     <div class="row">
-      <label class="chk" style="color:#94a3b8">Perfil <select name="profile">
+      <label class="chk" style="color:#94a3b8">Perfil <select name="profile" style="width:auto">
         <option value="orizon">orizon</option>
         <option value="wordpress">wordpress</option>
         <option value="generic">generic</option>
       </select></label>
-      <label class="chk"><input type="checkbox" name="html" checked> Generar informe HTML</label>
+      <label class="chk"><input type="checkbox" name="html" checked> Informe HTML</label>
       <button class="btn" type="submit">🛡️ Auditar</button>
     </div>
-    <div class="muted" style="margin-top:10px">URLs https:// → auditoria remota · carpetas → analisis de codigo + docroot · *.log → analisis de incidentes</div>
   </form>
 </div>
-$err
-<div class="card"><h2>Auditorias anteriores</h2>$jobsHtml</div>
+
+<div class="card" id="webs">
+  <h2>➕ Guardar web (con datos del servidor)</h2>
+  <form method="post" action="/webs/save">
+    <div class="grid">
+      <div><label class="f">Nombre</label><input type="text" name="name" placeholder="Web del cliente"></div>
+      <div><label class="f">URL publica</label><input type="text" name="url" placeholder="https://midominio.com"></div>
+      <div><label class="f">Acceso</label><select name="access">
+        <option value="url">Solo URL (auditoria remota de superficie)</option>
+        <option value="ftp">FTP (sube agente → audita dentro → borra)</option>
+        <option value="ssh">SSH (agente por CLI, necesita llave)</option>
+      </select></div>
+      <div><label class="f">Host servidor</label><input type="text" name="host" placeholder="ftp.midominio.com"></div>
+      <div><label class="f">Puerto</label><input type="text" name="port" placeholder="21 o 22"></div>
+      <div><label class="f">Usuario</label><input type="text" name="user"></div>
+      <div><label class="f">Contraseña (FTP)</label><input type="password" name="pass"></div>
+      <div><label class="f">Llave SSH (ruta local)</label><input type="text" name="key" placeholder="C:\Users\yo\.ssh\id_ed25519"></div>
+      <div><label class="f">Docroot remoto</label><input type="text" name="docroot" placeholder="/public_html o /var/www/html"></div>
+    </div>
+    <div class="row"><button class="btn sm" type="submit">Guardar web</button></div>
+    <div class="note">Los datos se guardan solo en tu PC (informes/ui/webs.json). El agente subido se borra solo tras auditar.</div>
+  </form>
+</div>
+
+<div class="card" id="ajustes">
+  <h2>⚙️ Avisos al movil (opcional)</h2>
+  <form method="post" action="/settings/save">
+    <div class="grid">
+      <div><label class="f">Topico ntfy.sh</label><input type="text" name="ntfy" value="$ntfy" placeholder="https://ntfy.sh/tu-topico-secreto"></div>
+    </div>
+    <div class="row"><button class="btn sm" type="submit">Guardar</button></div>
+    <div class="note">Crea un topico unico en ntfy.sh, suscribe la app de movil, y CyberShield te enviara push si una auditoria encuentra algo. Gratis y sin cuenta.</div>
+  </form>
+</div>
+
+<div class="card"><h2>📋 Auditorias anteriores</h2>$jobsHtml</div>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>
 </div></body></html>
 HTML;
 return true;

@@ -39,12 +39,37 @@ php cybershield.php all ./mi-web        # Windows: cybershield.bat (menú intera
 ## 🖥️ Panel web (app de escritorio)
 
 ```bash
-cybershield ui
+cybershield ui                 # panel en http://127.0.0.1:8321
+cybershield ui --host 0.0.0.0  # accesible desde el movil en tu Wi-Fi (⚠️ sin auth, solo LAN de confianza)
 ```
 
-Abre un panel local en `http://127.0.0.1:8321`: pega **una o varias webs**
-(una por línea), dale a *Auditar* y mira los resultados en vivo con sus
-informes HTML descargables. Solo escucha en tu PC — no es un servicio público.
+Panel local con marca Orizon:
+
+- **Auditoría multi-web**: pega URLs, carpetas o logs (uno por línea) y lanza
+  la cola. Resultados en vivo por objetivo con informe HTML descargable.
+- **Fichas de webs**: guarda cada web con sus datos de servidor (URL + FTP o
+  SSH + docroot remoto). Se guardan solo en tu PC (`informes/ui/webs.json`).
+- **Agente remoto**: con FTP o SSH, CyberShield sube un `cybershield-agent.php`
+  autocontenido y protegido por token, ejecuta la auditoría *dentro* del
+  servidor real (código + docroot) y lo borra al terminar.
+  - **FTP**: para hosting compartido — sube el agente al docroot y lo ejecuta
+    vía `https://tuweb/agent.php?token=...`
+  - **SSH**: `scp` a `/tmp` + ejecución por CLI — nada expuesto por HTTP
+    (requiere llave SSH; OpenSSH no acepta contraseña por línea de comandos)
+- **Alertas**: si una auditoría encuentra algo (no-SEGURO), queda registrado
+  en el panel y puede enviarte **push al móvil con ntfy.sh** (gratis, sin
+  cuenta: creas un tópico, te suscribes desde la app del móvil, listo).
+- **PWA**: instalable en el móvil ("Añadir a pantalla de inicio"). Por HTTPS
+  (túnel) o localhost se instala como app nativa.
+
+### Ver tus webs desde el móvil
+
+```bash
+cybershield ui --host 0.0.0.0        # luego: http://IP-DE-TU-PC:8321 en el movil
+```
+
+O expón `http://127.0.0.1:8321` por tu túnel (cloudflared, ngrok…) para
+acceder desde cualquier sitio con HTTPS y tener la PWA instalable.
 
 ## ⚡ Los 7 modos
 
@@ -66,7 +91,7 @@ cybershield ui                  → Panel web para auditar varias webs con un cl
 | **Incidentes** `log` | Access logs de Apache/Nginx: SQLi, traversal, RCE, fuerza bruta y scanners → gravedad + lista de IPs a bloquear (`--block`) |
 | **Todo** `all` | `code` + `sys` + informe ejecutivo |
 | **Reparar** `fix` | `.htaccess` blindado, cuarentena reversible en `.cybershield-quarantine/` y uploads sin ejecución PHP |
-| **Panel** `ui` | App web local: cola de auditorías multi-web, resultados en vivo, historial de informes |
+| **Panel** `ui` | App web local: cola de auditorías multi-web, fichas de servidor (FTP/SSH), agente remoto, alertas, historial |
 
 ## 🧠 Perfiles
 

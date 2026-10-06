@@ -1,0 +1,13 @@
+{
+  "name": "CyberShield AI — Orizon Studio",
+  "short_name": "CyberShield",
+  "description": "Panel de auditoria de seguridad para tus webs",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    { "src": "/logo", "sizes": "192x192", "type": "image/jpeg", "purpose": "any" },
+    { "src": "/logo", "sizes": "512x512", "type": "image/jpeg", "purpose": "any" }
+  ]
+}
