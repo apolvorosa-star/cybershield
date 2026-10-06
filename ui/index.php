@@ -249,16 +249,8 @@ $resolveRemote = function (array $job, int $i, array $f) use ($jobsRoot): array 
     $conn = array_merge($conn, ['pass' => Orizon\CyberShield\CredentialStore::decrypt((string) ($conn['pass'] ?? ''))]);
     // docroot del agente (disco) ↔ docroot FTP de la ficha
     $tj  = json_decode((string) @file_get_contents($jobsRoot . '/' . $job['id'] . "/t$i.json"), true) ?: [];
-    $drDisk = rtrim((string) ($tj['docroot'] ?? ''), '/');
-    $rel = $drDisk !== '' && str_starts_with($file, $drDisk)
-        ? substr($file, strlen($drDisk))
-        : (preg_replace('#^.*?/home/#', '/', $file) ?: '/' . basename($file));
-    $rel    = '/' . ltrim(str_replace('\\', '/', $rel), '/');
-    $ftpRoot = rtrim(str_replace('\\', '/', (string) ($conn['docroot'] ?? '')), '/') ?: '/';
-    // Anti path-traversal: la ruta resuelta debe quedar dentro del docroot
-    if (str_contains($rel, '..') || $rel === '/') return ['invalid', ''];
-    $remote = $ftpRoot === '/' ? $rel : $ftpRoot . $rel;
-    if (!str_starts_with($remote . '/', $ftpRoot . '/')) return ['invalid', ''];
+    $remote = Orizon\CyberShield\RemoteAudit::resolveRemotePath($conn, $file, $tj['docroot'] ?? null);
+    if ($remote === null) return ['invalid', ''];
     return ['ftp', $remote, $conn];
 };
 
@@ -285,6 +277,13 @@ if ($path === '/fix') {
             $rows .= "<div class='job'><div>$sev <b>{$f['rule']}</b> <span class='ur'>$rel:{$f['line']}</span>"
                 . "<div class='muted'>" . htmlspecialchars(substr((string) ($f['desc'] ?? ''), 0, 120)) . "</div></div>$btn</div>";
         }
+        $aiOk = !empty($settings['ai_url']) || !empty($settings['ai_key']);
+        $autoBtn = $aiOk
+            ? "<form method='post' action='/fix/auto' onsubmit=\"return confirm('La IA reparara TODOS los hallazgos de la lista uno a uno. Cada fichero se respalda en _cs_cuarentena/ y si la web falla se restaura solo. ¿Continuar?')\">"
+              . "<input type='hidden' name='id' value='$id'><input type='hidden' name='i' value='$i'>"
+              . "<button class='btn'>⚡ Reparar TODO con IA</button></form>"
+            : "<div class='muted'>⚡ Reparacion automatica: configura una IA en <a href='/'>Ajustes</a> (preset Ollama = gratis y local).</div>";
+        echo "<div class='row' style='margin-bottom:14px'>$autoBtn</div>";
         echo $rows ?: "<div class='muted'>Sin hallazgos criticos/altos reparables con IA.</div>";
         echo "<div class='links' style='margin-top:14px'><a href='/job?id=$id'>← volver a la auditoria</a></div></div></body></html>";
         return true;
@@ -386,6 +385,56 @@ if ($path === '/fix/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     echo $ok
         ? "<div style='color:#86efac;font-size:16px'>✅ <b>Web reparada</b> — se corrigio <b>$base</b>.<br><span class='muted' style='font-size:12px'>Original guardado en _cs_cuarentena/ · Re-audita para confirmar que el hallazgo desaparecio.</span><br><br><a class='btn sm' href='/fix?id=$id&i=$i'>← seguir reparando</a> <a class='btn sm' href='/'>🔁 re-auditar</a></div>"
         : "<div class='alert'>❌ No se pudo aplicar ($kind: " . htmlspecialchars($rpath) . ")</div>";
+    echo "</div></body></html>";
+    return true;
+}
+
+// ---------- Reparacion automatica con IA (lote) ----------
+if ($path === '/fix/auto' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id  = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['id'] ?? '');
+    $i   = (int) ($_POST['i'] ?? 0);
+    $dir = "$jobsRoot/$id";
+    if (!is_dir($dir)) { header('Location: /'); return true; }
+    $worker = $root . '/ui/worker.php';
+    $log    = "$dir/fixauto.log";
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        pclose(popen('start /B "" ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($worker)
+            . ' fixauto ' . escapeshellarg($dir) . ' ' . $i
+            . ' > ' . escapeshellarg($log) . ' 2>&1', 'r'));
+    } else {
+        exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($worker)
+            . ' fixauto ' . escapeshellarg($dir) . ' ' . $i
+            . ' > ' . escapeshellarg($log) . ' 2>&1 &');
+    }
+    header("Location: /fix/auto?id=$id&i=$i");
+    return true;
+}
+
+if ($path === '/fix/auto') {
+    $id  = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    $i   = (int) ($_GET['i'] ?? 0);
+    $fx  = json_decode((string) @file_get_contents("$jobsRoot/$id/fixstatus-$i.json"), true)
+        ?: ['state' => 'queued', 'results' => []];
+    $running = ($fx['state'] ?? '') !== 'done';
+    if ($running) header('Refresh: 5');
+    echo head('Reparando con IA', $logo);
+    echo "<div class='card'><h2>⚡ Reparacion automatica — " . htmlspecialchars((string) ($fx['target'] ?? '')) . "</h2>";
+    echo $running
+        ? "<div class='muted'>La IA esta reparando hallazgos uno a uno — esta pagina se actualiza sola. Puedes cerrar y volver.</div>"
+        : "<div style='color:#86efac;font-size:15px'>✅ <b>" . htmlspecialchars((string) ($fx['summary'] ?? 'Terminado')) . "</b></div>";
+    echo "<table style='width:100%;margin-top:14px;border-collapse:collapse;font-size:13px'>";
+    foreach (($fx['results'] ?? []) as $r) {
+        $ico = ['ok' => '✅', 'skip' => '⏭️', 'running' => '⏳'][$r['result']] ?? '•';
+        echo "<tr style='border-top:1px solid #1e293b'><td style='padding:7px 4px'>$ico</td>"
+            . "<td style='padding:7px 4px'><b>" . htmlspecialchars((string) $r['rule']) . "</b> "
+            . htmlspecialchars(basename((string) $r['file'])) . "</td>"
+            . "<td class='muted' style='padding:7px 4px'>" . htmlspecialchars((string) ($r['note'] ?? '')) . "</td></tr>";
+    }
+    echo "</table>";
+    if (!$running) {
+        echo "<div class='row'><a class='btn sm' href='/fix?id=$id&i=$i'>← hallazgos</a>"
+            . "<a class='btn sm' href='/'>🔁 re-auditar</a></div>";
+    }
     echo "</div></body></html>";
     return true;
 }

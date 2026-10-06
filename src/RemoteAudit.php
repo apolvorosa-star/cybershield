@@ -150,6 +150,31 @@ class RemoteAudit
         return (bool) $ok;
     }
 
+    /**
+     * Mapea la ruta de disco que reporta el agente a la ruta FTP de la ficha.
+     * Devuelve null si la ruta resuelve fuera del docroot (anti path-traversal).
+     */
+    public static function resolveRemotePath(array $conn, string $agentFile, ?string $agentDocroot): ?string
+    {
+        $file   = str_replace('\\', '/', $agentFile);
+        $drDisk = rtrim(str_replace('\\', '/', (string) $agentDocroot), '/');
+        $rel = $drDisk !== '' && str_starts_with($file, $drDisk)
+            ? substr($file, strlen($drDisk))
+            : (preg_replace('#^.*?/home/#', '/', $file) ?: '/' . basename($file));
+        $rel = '/' . ltrim($rel, '/');
+        $ftpRoot = rtrim(str_replace('\\', '/', (string) ($conn['docroot'] ?? '')), '/') ?: '/';
+        if (str_contains($rel, '..') || $rel === '/') return null;
+        $remote = $ftpRoot === '/' ? $rel : $ftpRoot . $rel;
+        if (!str_starts_with($remote . '/', $ftpRoot . '/')) return null;
+        return $remote;
+    }
+
+    /** HTTP status de una URL (para post-check tras aplicar un parche). */
+    public static function httpStatus(string $url): int
+    {
+        return self::httpGet($url)['status'];
+    }
+
     private static function httpGet(string $url): array
     {
         if (extension_loaded('curl')) {

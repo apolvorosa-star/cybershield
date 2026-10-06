@@ -115,7 +115,26 @@ Todo vive solo en tu PC, en `informes/ui/`:
 En cualquier informe del panel verás el botón **🔧 Reparar con IA** junto a los
 hallazgos críticos/altos que apuntan a ficheros `.php`.
 
-Flujo (siempre con revisión humana — la IA propone, tú decides):
+### Modo automático: ⚡ Reparar TODO con IA
+
+Con una IA configurada en Ajustes (preset **Ollama** = gratis y local), la lista
+de hallazgos muestra el botón **⚡ Reparar TODO con IA**. Al pulsarlo, un worker
+en segundo plano recorre los hallazgos uno a uno y por cada uno:
+
+descarga el fichero → la IA propone el parche → `php -l` valida sintaxis →
+backup en `_cs_cuarentena/` → sube el parche → **post-check HTTP**: si la web
+cae (5xx) tras el parche, restaura el original automáticamente.
+
+La página `/fix/auto` muestra el progreso en vivo y al finalizar envía
+notificación «WEB REPARADA (N parches)» por ntfy/Telegram. Los ficheros que la
+IA no pudo corregir quedan marcados ⏭️ con el motivo.
+
+> La protección para quien no programa no es leer el código — son las
+> guardas automáticas: backup + validación + auto-rollback.
+
+### Modo manual (un hallazgo)
+
+Siempre con revisión humana — la IA propone, tú decides:
 
 1. **Reparar** → el panel descarga el fichero afectado del servidor (por FTP,
    o del disco si el objetivo era local) y te muestra el código actual.

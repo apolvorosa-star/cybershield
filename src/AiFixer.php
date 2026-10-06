@@ -24,6 +24,15 @@ class AiFixer
         $desc = $f['desc'] ?? $f['risk'] ?? '';
         $fix  = $f['fix'] ?? '';
 
+        // Contexto: si el archivo es una API JSON, un token CSRF romperia
+        // a los clientes — el fix correcto es exigir POST.
+        $apiHint = str_contains($code, 'application/json')
+            ? "\nIMPORTANTE: este archivo es una API JSON (devuelve application/json). "
+              . "Sus clientes NO son navegadores: NO uses session_start() ni tokens CSRF. "
+              . "Para CSRF en APIs la correccion es rechazar metodos que no sean POST "
+              . "(HTTP 405) y leer solo \$_POST."
+            : '';
+
         return <<<PROMPT
 Eres un experto en seguridad PHP. Corrige el siguiente archivo corrigiendo
 SOLO la vulnerabilidad detectada — no refactorices ni cambies estilo.
@@ -31,7 +40,7 @@ SOLO la vulnerabilidad detectada — no refactorices ni cambies estilo.
 ARCHIVO: $file
 VULNERABILIDAD: $rule (linea $line)
 DESCRIPCION: $desc
-RECOMENDACION DEL SCANNER: $fix
+RECOMENDACION DEL SCANNER: $fix$apiHint
 
 Reglas:
 - Devuelve el archivo PHP COMPLETO corregido, sin explicaciones
@@ -69,7 +78,7 @@ PROMPT;
 
         $ctx = stream_context_create(['http' => [
             'method'  => 'POST',
-            'timeout' => 90,
+            'timeout' => 300, // modelos locales grandes tardan en cargar a VRAM
             'header'  => ($key !== '' ? "Authorization: Bearer $key\r\n" : '') . 'Content-Type: application/json',
             'content' => $payload,
             'ignore_errors' => true,

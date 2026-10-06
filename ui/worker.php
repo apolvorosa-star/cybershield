@@ -25,6 +25,12 @@ use Orizon\CyberShield\Notifier;
 use Orizon\CyberShield\RemoteAudit;
 use Orizon\CyberShield\Report;
 
+// Modo reparacion automatica: php worker.php fixauto <jobDir> <targetIdx>
+if (($argv[1] ?? '') === 'fixauto') {
+    require __DIR__ . '/fixauto.php';
+    exit(0);
+}
+
 $jobDir = $argv[1] ?? '';
 if (!is_dir($jobDir)) exit(1);
 
