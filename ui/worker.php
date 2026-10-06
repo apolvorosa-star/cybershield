@@ -89,7 +89,7 @@ foreach ($job['targets'] as $i => $t) {
         } else {
             $result = $r;
             file_put_contents($json, json_encode([
-                'target' => $t['target'], 'mode' => $t['mode'],
+                'target' => $t['target'], 'mode' => $t['mode'], 'docroot' => $r['docroot'] ?? null,
                 'counts' => $r['counts'], 'status' => $r['status'], 'findings' => $r['findings'],
             ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
             file_put_contents($txt, Report::text($r['findings'], $t['target']));

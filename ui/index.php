@@ -17,6 +17,8 @@ $alertsFile   = $jobsRoot . '/alerts.json';
 $settingsFile = $jobsRoot . '/settings.json';
 
 require_once $root . '/src/CredentialStore.php';
+require_once $root . '/src/RemoteAudit.php';
+require_once $root . '/src/AiFixer.php';
 Orizon\CyberShield\CredentialStore::init($jobsRoot);
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
@@ -28,6 +30,9 @@ header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 
 $readJson = fn($f, $def = []) => json_decode((string) @file_get_contents($f), true) ?: $def;
+
+$logoFile = $root . '/assets/logo.jpg';
+$logo     = is_file($logoFile) ? 'data:image/jpeg;base64,' . base64_encode(file_get_contents($logoFile)) : '';
 
 // ---------- Auth del panel ----------
 // La contrasena se crea la primera vez que entras; cookie firmada HMAC
@@ -160,6 +165,9 @@ if ($path === '/settings/save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'tg_token'   => trim((string) ($_POST['tg_token'] ?? '')),
         'tg_chat'    => trim((string) ($_POST['tg_chat'] ?? '')),
         'webhook'    => trim((string) ($_POST['webhook'] ?? '')),
+        'ai_url'     => trim((string) ($_POST['ai_url'] ?? '')),
+        'ai_key'     => trim((string) ($_POST['ai_key'] ?? '')),
+        'ai_model'   => trim((string) ($_POST['ai_model'] ?? '')),
         'panel_pass' => $prev['panel_pass'] ?? '',
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
     header('Location: /?ok=ajustes#ajustes');
@@ -231,10 +239,157 @@ if ($path === '/run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     return true;
 }
 
-// ---------- Vistas ----------
+// ---------- Reparar con IA ----------
+// Mapea ruta de disco del agente → ruta FTP de la ficha
+$resolveRemote = function (array $job, int $i, array $f) use ($jobsRoot): array {
+    $t    = $job['targets'][$i] ?? [];
+    $conn = $t['conn'] ?? null;
+    $file = (string) ($f['file'] ?? '');
+    if (!$conn) return ['local', $file]; // objetivo local: la ruta ya es de este PC
+    $conn = array_merge($conn, ['pass' => Orizon\CyberShield\CredentialStore::decrypt((string) ($conn['pass'] ?? ''))]);
+    // docroot del agente (disco) ↔ docroot FTP de la ficha
+    $tj  = json_decode((string) @file_get_contents($jobsRoot . '/' . $job['id'] . "/t$i.json"), true) ?: [];
+    $drDisk = rtrim((string) ($tj['docroot'] ?? ''), '/');
+    $rel = $drDisk !== '' && str_starts_with($file, $drDisk)
+        ? substr($file, strlen($drDisk))
+        : (preg_replace('#^.*?/home/#', '/', $file) ?: '/' . basename($file));
+    $rel    = '/' . ltrim(str_replace('\\', '/', $rel), '/');
+    $ftpRoot = rtrim(str_replace('\\', '/', (string) ($conn['docroot'] ?? '')), '/') ?: '/';
+    // Anti path-traversal: la ruta resuelta debe quedar dentro del docroot
+    if (str_contains($rel, '..') || $rel === '/') return ['invalid', ''];
+    $remote = $ftpRoot === '/' ? $rel : $ftpRoot . $rel;
+    if (!str_starts_with($remote . '/', $ftpRoot . '/')) return ['invalid', ''];
+    return ['ftp', $remote, $conn];
+};
 
-$logoFile = $root . '/assets/logo.jpg';
-$logo     = is_file($logoFile) ? 'data:image/jpeg;base64,' . base64_encode(file_get_contents($logoFile)) : '';
+if ($path === '/fix') {
+    $id  = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    $i   = (int) ($_GET['i'] ?? 0);
+    $job = json_decode((string) @file_get_contents("$jobsRoot/$id/job.json"), true);
+    $res = json_decode((string) @file_get_contents("$jobsRoot/$id/t$i.json"), true);
+    if (!$job || !$res) { header('Location: /'); return true; }
+    echo head('Reparar', $logo);
+    echo "<div class='card'><h2>🔧 Reparar con IA — {$res['target']}</h2>";
+
+    if (!isset($_GET['n'])) {
+        // Lista de hallazgos criticos/altos reparables
+        $rows = '';
+        foreach ($res['findings'] as $n => $f) {
+            if (!in_array($f['severity'], ['critical', 'high'], true)) continue;
+            $isPhp = str_ends_with(strtolower((string) $f['file']), '.php');
+            $btn = $isPhp
+                ? "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n'>Reparar</a>"
+                : "<span class='muted'>manual</span>";
+            $sev = $f['severity'] === 'critical' ? '🔴' : '🟠';
+            $rel = basename((string) $f['file']);
+            $rows .= "<div class='job'><div>$sev <b>{$f['rule']}</b> <span class='ur'>$rel:{$f['line']}</span>"
+                . "<div class='muted'>" . htmlspecialchars(substr((string) ($f['desc'] ?? ''), 0, 120)) . "</div></div>$btn</div>";
+        }
+        echo $rows ?: "<div class='muted'>Sin hallazgos criticos/altos reparables con IA.</div>";
+        echo "<div class='links' style='margin-top:14px'><a href='/job?id=$id'>← volver a la auditoria</a></div></div></body></html>";
+        return true;
+    }
+
+    // Pantalla de reparacion de un hallazgo
+    $n = (int) $_GET['n'];
+    $f = $res['findings'][$n] ?? null;
+    if (!$f) { echo "Hallazgo no existe.</div>"; return true; }
+    [$kind, $rpath, $conn] = $resolveRemote($job, $i, $f);
+    if ($kind === 'invalid') {
+        echo "<div class='alert'>Ruta fuera del docroot — reparacion bloqueada.</div></div></body></html>";
+        return true;
+    }
+    $code = $kind === 'ftp'
+        ? Orizon\CyberShield\RemoteAudit::ftpDownload($conn, $rpath)
+        : @file_get_contents($rpath);
+    if ($code === null || $code === false || $code === '') {
+        echo "<div class='muted'>No se pudo leer <b>" . htmlspecialchars($rpath) . "</b> ($kind). ¿Fichero borrado o FTP inaccesible?</div></div></body></html>";
+        return true;
+    }
+
+    $proposal = '';
+    $note = '';
+    if (!empty($settings['ai_key'])) {
+        $ai = Orizon\CyberShield\AiFixer::fix($settings, $f, $code, (string) $f['file']);
+        if (isset($ai['code'])) $proposal = $ai['code'];
+        else $note = "<div class='alert'>⚠️ " . htmlspecialchars($ai['error']) . "</div>";
+    } else {
+        $note = "<div class='muted'>Sin API key: copia el prompt, pegalo en tu IA (ChatGPT, Devin…) y pega el codigo corregido abajo.</div>";
+    }
+    $prompt = htmlspecialchars(Orizon\CyberShield\AiFixer::buildPrompt($f, $code, (string) $f['file']));
+    $codeH  = htmlspecialchars($code);
+    $propH  = htmlspecialchars($proposal);
+    $propTag = $proposal !== '' ? ' (propuesto por IA — revisalo)' : '';
+    $fDesc   = htmlspecialchars((string) ($f['desc'] ?? $f['risk'] ?? ''));
+    echo <<<HTML
+<div class='muted'>{$f['severity']} · {$f['rule']} · <b>{$f['file']}:{$f['line']}</b></div>
+<div class='muted' style='margin-top:4px'>{$fDesc}</div>
+$note
+<details style='margin:12px 0'><summary style='cursor:pointer;color:#a5b4fc'>📋 Prompt para IA (clic para ver/copiar)</summary>
+<textarea readonly onclick='this.select()' style='min-height:200px'>$prompt</textarea></details>
+<details><summary style='cursor:pointer;color:#a5b4fc'>📄 Codigo actual</summary>
+<textarea readonly style='min-height:200px'>$codeH</textarea></details>
+<form method='post' action='/fix/apply' style='margin-top:14px'>
+<input type='hidden' name='id' value='$id'><input type='hidden' name='i' value='$i'><input type='hidden' name='n' value='$n'>
+<label class='f'>Codigo corregido$propTag</label>
+<textarea name='code' style='min-height:280px' required>$propH</textarea>
+<div class='row'><button class='btn'>✅ Aplicar al servidor</button>
+<a href='/fix?id=$id&i=$i' style='color:#94a3b8;font-size:13px'>cancelar</a></div>
+<div class='note'>Se hace backup del original en _cs_cuarentena/ antes de escribir.</div>
+</form>
+</div></body></html>
+HTML;
+    return true;
+}
+
+if ($path === '/fix/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['id'] ?? '');
+    $i    = (int) ($_POST['i'] ?? 0);
+    $n    = (int) ($_POST['n'] ?? 0);
+    $code = (string) ($_POST['code'] ?? '');
+    $job  = json_decode((string) @file_get_contents("$jobsRoot/$id/job.json"), true);
+    $res  = json_decode((string) @file_get_contents("$jobsRoot/$id/t$i.json"), true);
+    $f    = $res['findings'][$n] ?? null;
+    echo head('Aplicar fix', $logo);
+    echo "<div class='card'>";
+    if (!$job || !$res || !$f || !str_starts_with(ltrim($code), '<')) {
+        echo "Datos invalidos.</div></body></html>";
+        return true;
+    }
+    // Sintaxis PHP obligatoria antes de tocar el servidor
+    if (str_ends_with(strtolower((string) $f['file']), '.php')) {
+        $tmp = tempnam(sys_get_temp_dir(), 'csfix') . '.php';
+        file_put_contents($tmp, $code);
+        exec(sprintf('"%s" -l %s 2>&1', PHP_BINARY, escapeshellarg($tmp)), $lintOut, $lintRc);
+        @unlink($tmp);
+        if ($lintRc !== 0) {
+            echo "<div class='alert'>❌ El codigo propuesto no compila (php -l):<br><pre style='white-space:pre-wrap'>"
+                . htmlspecialchars(implode("\n", $lintOut)) . "</pre>No se ha tocado el servidor.</div></body></html>";
+            return true;
+        }
+    }
+    [$kind, $rpath, $conn] = $resolveRemote($job, $i, $f);
+    if ($kind === 'invalid') {
+        echo "<div class='alert'>Ruta fuera del docroot — reparacion bloqueada.</div></div></body></html>";
+        return true;
+    }
+    if ($kind === 'ftp') {
+        $bak  = ($conn['docroot'] ?? '') . '/_cs_cuarentena/' . basename($rpath) . '.' . date('Ymd-His') . '.bak';
+        Orizon\CyberShield\RemoteAudit::ftpUpload($conn, ($conn['docroot'] ?? '') . '/_cs_cuarentena/.htaccess', "Require all denied\nDeny from all\n");
+        $moved = Orizon\CyberShield\RemoteAudit::ftpMove($conn, $rpath, $bak);
+        $ok    = $moved && Orizon\CyberShield\RemoteAudit::ftpUpload($conn, $rpath, $code);
+    } else {
+        $moved = @copy($rpath, $rpath . '.bak-' . date('Ymd-His'));
+        $ok    = $moved && file_put_contents($rpath, $code) !== false;
+    }
+    echo $ok
+        ? "<div style='color:#86efac'>✅ Parche aplicado. Original guardado en cuarentena/backup.<br><br><a class='btn sm' href='/fix?id=$id&i=$i'>← seguir reparando</a></div>"
+        : "<div class='alert'>❌ No se pudo aplicar ($kind: " . htmlspecialchars($rpath) . ")</div>";
+    echo "</div></body></html>";
+    return true;
+}
+
+// ---------- Vistas ----------
 
 function head(string $title, string $logo): string
 {
@@ -305,7 +460,7 @@ const stName = {queued:'En cola',running:'Auditando…',done:'Listo',error:'Erro
 const stCls = {queued:'st-queued',running:'st-running',done:'st-done',error:'st-error'};
 function render(s){
   const el = document.getElementById('targets');
-  el.innerHTML = (s.targets||[]).map(t=>{
+  el.innerHTML = (s.targets||[]).map((t,idx)=>{
     let pills='',big='',links='',note='';
     if(t.counts){pills='<div class="pills">'+sev.map(k=>icon[k]+' '+(t.counts[k]||0)).join(' &nbsp;')+'</div>';}
     if(t.status){const cls=t.status==='SEGURO'?'ok':(t.status==='AMENAZA DETECTADA'?'bad':'warn');
@@ -313,6 +468,7 @@ function render(s){
     if(t.note)note='<div class="note">'+t.note+'</div>';
     if(t.html)links+='<a href="/report?id='+id+'&f='+t.html+'" target="_blank">📄 Informe HTML</a>';
     if(t.txt)links+='<a href="/report?id='+id+'&f='+t.txt+'" target="_blank">🖥️ Salida consola</a>';
+    if(t.state==='done'&&t.counts&&(t.counts.critical+t.counts.high)>0)links+='<a href="/fix?id='+id+'&i='+idx+'">🔧 Reparar con IA</a>';
     const run=t.state==='running'?'<span class="dot"></span>':'';
     return '<div class="tcard"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">'
       +'<div><span class="badge b-'+t.mode+'">'+t.mode+'</span> <span class="tgt">'+t.target+'</span></div>'
@@ -376,6 +532,9 @@ $ntfy = htmlspecialchars($settings['ntfy'] ?? '');
 $tgT  = htmlspecialchars($settings['tg_token'] ?? '');
 $tgC  = htmlspecialchars($settings['tg_chat'] ?? '');
 $whk  = htmlspecialchars($settings['webhook'] ?? '');
+$aiU  = htmlspecialchars($settings['ai_url'] ?? '');
+$aiK  = htmlspecialchars($settings['ai_key'] ?? '');
+$aiM  = htmlspecialchars($settings['ai_model'] ?? '');
 
 echo head('Panel', $logo);
 echo <<<HTML
@@ -437,9 +596,12 @@ C:\xampp\htdocs\mi-web
       <div><label class="f">Telegram bot token</label><input type="text" name="tg_token" value="$tgT" placeholder="123456:ABC-DEF..."></div>
       <div><label class="f">Telegram chat_id</label><input type="text" name="tg_chat" value="$tgC" placeholder="123456789"></div>
       <div><label class="f">Webhook (JSON POST)</label><input type="text" name="webhook" value="$whk" placeholder="https://tu-n8n/webhook/..."></div>
+      <div><label class="f">IA: endpoint (opcional)</label><input type="text" name="ai_url" value="$aiU" placeholder="https://api.openai.com/v1/chat/completions"></div>
+      <div><label class="f">IA: API key</label><input type="password" name="ai_key" value="$aiK" placeholder="sk-... (vacio = modo manual)"></div>
+      <div><label class="f">IA: modelo</label><input type="text" name="ai_model" value="$aiM" placeholder="gpt-4o-mini"></div>
     </div>
     <div class="row"><button class="btn sm" type="submit">Guardar</button></div>
-    <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts.</div>
+    <div class="note">ntfy.sh: crea un topico unico y suscribete desde la app del movil (gratis, sin cuenta). Telegram: crea un bot con @BotFather. Webhook: recibe JSON con target+status+counts. IA: cualquier endpoint OpenAI-compatible (OpenAI, Ollama local http://127.0.0.1:11434/v1/chat/completions…); sin key, "Reparar con IA" genera el prompt para copiar.</div>
   </form>
 </div>
 

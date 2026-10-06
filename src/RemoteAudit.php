@@ -102,6 +102,54 @@ class RemoteAudit
         return $json;
     }
 
+    /** Conexion FTP reutilizable (para reparaciones: bajar/subir/mover). */
+    private static function ftpOpen(array $conn): mixed
+    {
+        if (!function_exists('ftp_connect')) return null;
+        $port = (int) ($conn['port'] ?? 21) ?: 21;
+        $ftp = @ftp_connect($conn['host'] ?? '', $port, 10);
+        if (!$ftp || !@ftp_login($ftp, $conn['user'] ?? '', $conn['pass'] ?? '')) return null;
+        ftp_pasv($ftp, true);
+        return $ftp;
+    }
+
+    /** Descarga un fichero remoto. Devuelve contenido o null. */
+    public static function ftpDownload(array $conn, string $remote): ?string
+    {
+        $ftp = self::ftpOpen($conn);
+        if (!$ftp) return null;
+        $tmp = tempnam(sys_get_temp_dir(), 'csd');
+        $ok  = @ftp_get($ftp, $tmp, $remote, FTP_BINARY);
+        ftp_close($ftp);
+        $c = $ok ? file_get_contents($tmp) : null;
+        @unlink($tmp);
+        return $c === false ? null : $c;
+    }
+
+    /** Sube contenido a una ruta remota (crea el destino). */
+    public static function ftpUpload(array $conn, string $remote, string $content): bool
+    {
+        $ftp = self::ftpOpen($conn);
+        if (!$ftp) return false;
+        $tmp = tempnam(sys_get_temp_dir(), 'csu');
+        file_put_contents($tmp, $content);
+        $ok = @ftp_put($ftp, $remote, $tmp, FTP_BINARY);
+        @unlink($tmp);
+        ftp_close($ftp);
+        return (bool) $ok;
+    }
+
+    /** Mueve/renombra un fichero remoto (para mandar el original a cuarentena). */
+    public static function ftpMove(array $conn, string $from, string $to): bool
+    {
+        $ftp = self::ftpOpen($conn);
+        if (!$ftp) return false;
+        @ftp_mkdir($ftp, dirname($to));
+        $ok = @ftp_rename($ftp, $from, $to);
+        ftp_close($ftp);
+        return (bool) $ok;
+    }
+
     private static function httpGet(string $url): array
     {
         if (extension_loaded('curl')) {

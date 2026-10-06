@@ -109,3 +109,33 @@ Todo vive solo en tu PC, en `informes/ui/`:
 | SSH: "password no soportado" | OpenSSH de CLI no acepta contraseña | Configura llave SSH (`ssh-keygen` + copiar `id_*.pub` al servidor) |
 | El agente "desaparece" sin resultado | El antivirus del hosting lo cuarentena | Revisar logs del hosting; avisar para codificar firmas |
 | `run-saved` no encuentra webs | Las fichas se crearon en otro jobsRoot | Las fichas viven en `informes/ui/webs.json` del proyecto |
+
+## 8. Reparar con IA
+
+En cualquier informe del panel verás el botón **🔧 Reparar con IA** junto a los
+hallazgos críticos/altos que apuntan a ficheros `.php`.
+
+Flujo (siempre con revisión humana — la IA propone, tú decides):
+
+1. **Reparar** → el panel descarga el fichero afectado del servidor (por FTP,
+   o del disco si el objetivo era local) y te muestra el código actual.
+2. **Prompt** → despliega «📋 Prompt para IA» y cópialo en tu LLM favorito
+   (ChatGPT, Devin, Claude…). Pega el código corregido en el textarea.
+   - Si en **Ajustes** rellenas `ai_url` + `ai_key` + `ai_model`
+     (cualquier endpoint compatible con OpenAI: OpenAI, DeepSeek, Ollama
+     local, Groq…), el panel llama a la API y **pre-rellena** la propuesta.
+3. **Revisa** el código propuesto — no apliques a ciegas.
+4. **✅ Aplicar al servidor** → antes de escribir:
+   - valida la sintaxis con `php -l` (si no compila, no toca nada),
+   - mueve el original a `_cs_cuarentena/` en el servidor,
+   - sube el fichero corregido.
+5. Re-audita la web para confirmar que el hallazgo desapareció.
+
+Protecciones incorporadas:
+
+- Solo se reparan rutas que resuelven **dentro del docroot** auditado
+  (sin `..`, sin escritura arbitraria).
+- El `.htaccess` de `_cs_cuarentena/` deniega el acceso web a los backups.
+- En local el backup queda como `fichero.php.bak-AAAAMMDD-HHMMSS`.
+
+> FTP va en claro — para producción seria usa SSH cuando el hosting lo permita.
