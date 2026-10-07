@@ -92,9 +92,51 @@ class Whitelist
     public static function isProtectedName(string $path): bool
     {
         $b = strtolower(basename(str_replace('\\', '/', $path)));
-        if (in_array($b, ['wp-config.php', '.htaccess', '.htpasswd', 'config.local.php', 'config.php'], true)) {
+        if (in_array($b, [
+            'wp-config.php',      // WordPress
+            'configuration.php',  // Joomla
+            'settings.php',       // Drupal
+            'localsettings.php',  // MediaWiki
+            'parameters.php', 'parameters.yml', 'parameters.yaml', // PrestaShop/Symfony
+            '.htaccess', '.htpasswd',
+            'config.local.php', 'config.php',
+        ], true)) {
             return true;
         }
         return (bool) fnmatch('.env*', $b, FNM_CASEFOLD);
+    }
+
+    /**
+     * Rutas que la reparacion automatica NUNCA toca: lo anterior + el
+     * "core" de CMS y dependencias. Esos ficheros los gestiona el CMS
+     * (una actualizacion los sobrescribe) o son codigo generado/cache:
+     * parchearlos es inutil o rompe la web al regenerarse.
+     * Plugins y temas SI se pueden reparar (son el vector real).
+     */
+    public static function isProtectedPath(string $path): bool
+    {
+        if (self::isProtectedName($path)) {
+            return true;
+        }
+        $rel = strtolower(str_replace('\\', '/', ltrim($path, '/')));
+        static $dirs = [
+            'wp-admin/', 'wp-includes/',        // WordPress core
+            'wp-content/upgrade/',              // WP update scratch
+            'vendor/', 'node_modules/',         // dependencias
+            'libraries/', 'system/',            // Joomla / CodeIgniter core
+            'core/', 'modules/system/',         // Drupal core
+            'var/cache/', 'var/proxies/',       // PrestaShop/Symfony cache
+            'app/cache/', 'storage/framework/', // Laravel + cache Symfony antigua
+            'runtime/', 'tmp/cache/', 'cache/', // codigo generado
+            '.git/', '.svn/',                   // control de versiones
+            '_cs_cuarentena/',                  // cuarentena propia
+        ];
+        foreach ($dirs as $d) {
+            $d = '/' . $d;
+            if (str_starts_with('/' . $rel, $d) || strpos('/' . $rel, $d) !== false) {
+                return true;
+            }
+        }
+        return false;
     }
 }

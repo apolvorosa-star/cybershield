@@ -275,7 +275,7 @@ if ($path === '/fix') {
             [$k, $rp, $c] = $resolveRemote($job, $i, ['file' => $fpath]);
             if ($k === 'invalid') return true; // fuera de docroot = bloqueado igualmente
             return Orizon\CyberShield\Whitelist::check($wlRules, (string) $rp, $c ?: null, (string) ($res['target'] ?? ''))
-                || Orizon\CyberShield\Whitelist::isProtectedName((string) $rp);
+                || Orizon\CyberShield\Whitelist::isProtectedPath((string) $rp);
         };
         // Reglas que cambian el comportamiento de la web: la IA genera la
         // propuesta pero NUNCA se auto-aplican (un 403 silencioso no lo
@@ -407,7 +407,7 @@ if ($path === '/fix/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // Whitelist + ficheros protegidos: nunca se reescriben
     $wlRules = Orizon\CyberShield\Whitelist::rules($conn ?: null);
     if (Orizon\CyberShield\Whitelist::check($wlRules, (string) $rpath, $conn ?: null, (string) ($res['target'] ?? ''))
-        || Orizon\CyberShield\Whitelist::isProtectedName((string) $rpath)) {
+        || Orizon\CyberShield\Whitelist::isProtectedPath((string) $rpath)) {
         echo "<div class='alert'>🛡 <b>" . htmlspecialchars(basename((string) $rpath)) . "</b> esta en la whitelist o es un fichero protegido (.env/config) — no se reescribe. Los .env se protegen con el .htaccess de los fixes rapidos.</div></div></body></html>";
         return true;
     }

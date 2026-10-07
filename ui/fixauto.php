@@ -120,7 +120,7 @@ foreach (($res['findings'] ?? []) as $n => $f) {
 
     // 1b. Whitelist + ficheros protegidos (secretos/config nunca se reescriben)
     if ($isWhitelisted((string) $rpath)) { $fail('en whitelist — protegido, no se toca'); continue; }
-    if (Whitelist::isProtectedName((string) $rpath)) { $fail('fichero protegido (.env/config) — se protege por .htaccess, no se reescribe'); continue; }
+    if (Whitelist::isProtectedPath((string) $rpath)) { $fail('fichero protegido (.env/config/core CMS) — no se reescribe'); continue; }
     if (stripos(str_replace('\\', '/', (string) $rpath), '/_cs_cuarentena/') !== false
         || stripos(basename(dirname((string) $rpath)), '_cs_cuarentena') === 0) {
         $fail('ya esta en cuarentena — no se parchea'); continue;
