@@ -97,6 +97,18 @@ class RemoteFixer
             $first = explode('/', $d)[0];
             if (!in_array($first, $rootEntries, true)) continue; // la carpeta no existe
             if (Whitelist::check($wl, "$dr/$d/", $conn, $siteUrl)) continue;
+            // Guardia: si la carpeta sirve PHP legitimo (p.ej. descargas/index.php),
+            // denegar PHP ahi romperia la web — se salta y se avisa.
+            $inside = RemoteAudit::ftpList($conn, "$dr/$d") ?? [];
+            $phpInUse = array_filter($inside, fn($n) => (bool) preg_match('/\.(php|phtml|phar)$/i', $n));
+            if ($phpInUse) {
+                $out[] = [
+                    'accion'  => "proteger $d/",
+                    'ok'      => true,
+                    'detalle' => 'OJO: contiene PHP en uso (' . implode(', ', array_slice($phpInUse, 0, 3)) . ') — no se deniega, revisar a mano',
+                ];
+                continue;
+            }
             $ok = RemoteAudit::ftpUpload($conn, "$dr/$d/.htaccess", self::noExecBlock($d !== '_cs_cuarentena'));
             $out[] = [
                 'accion'  => "proteger $d/",
