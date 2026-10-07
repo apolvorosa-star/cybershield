@@ -277,24 +277,33 @@ if ($path === '/fix') {
             return Orizon\CyberShield\Whitelist::check($wlRules, (string) $rp, $c ?: null, (string) ($res['target'] ?? ''))
                 || Orizon\CyberShield\Whitelist::isProtectedName((string) $rp);
         };
+        // Reglas que cambian el comportamiento de la web: la IA genera la
+        // propuesta pero NUNCA se auto-aplican (un 403 silencioso no lo
+        // detecta el post-check). Solo con revision humana una a una.
+        $manualRules = ['csrf', 'access', 'auth', 'authentication', 'session',
+                        'clickjacking', 'open-redirect', 'rate-limit'];
         $rows = '';
         foreach ($res['findings'] as $n => $f) {
             if (!in_array($f['severity'], ['critical', 'high'], true)) continue;
-            $isPhp = str_ends_with(strtolower((string) $f['file']), '.php');
-            $prot = $isPhp && $wlCheck((string) $f['file']);
+            $isPhp   = str_ends_with(strtolower((string) $f['file']), '.php');
+            $prot    = $isPhp && $wlCheck((string) $f['file']);
+            $isManual = $isPhp && in_array(strtolower((string) ($f['rule'] ?? '')), $manualRules, true);
             $btn = !$isPhp
                 ? "<span class='muted'>manual</span>"
                 : ($prot
                     ? "<span class='muted' title='En whitelist o fichero protegido'>🛡 protegido</span>"
-                    : "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n'>Reparar</a>");
+                    : ($isManual
+                        ? "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n' title='Cambia el comportamiento de la web: no se auto-aplica'>👁 revisar</a>"
+                        : "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n'>Reparar</a>"));
             $sev = $f['severity'] === 'critical' ? '🔴' : '🟠';
             $rel = basename((string) $f['file']);
-            $rows .= "<div class='job'><div>$sev <b>{$f['rule']}</b> <span class='ur'>$rel:{$f['line']}</span>"
+            $tag = $isManual ? " <span class='muted' style='font-size:11px'>(cambio funcional)</span>" : '';
+            $rows .= "<div class='job'><div>$sev <b>{$f['rule']}</b>$tag <span class='ur'>$rel:{$f['line']}</span>"
                 . "<div class='muted'>" . htmlspecialchars(substr((string) ($f['desc'] ?? ''), 0, 120)) . "</div></div>$btn</div>";
         }
         $aiOk = !empty($settings['ai_url']) || !empty($settings['ai_key']);
         $autoBtn = $aiOk
-            ? "<form method='post' action='/fix/auto' onsubmit=\"return confirm('La IA reparara TODOS los hallazgos de la lista uno a uno. Cada fichero se respalda en _cs_cuarentena/ y si la web falla se restaura solo. ¿Continuar?')\">"
+            ? "<form method='post' action='/fix/auto' onsubmit=\"return confirm('La IA reparara los hallazgos SEGUROS (sqli, traversal, xss, archivos expuestos). Los de tipo csrf/acceso quedan para revision manual. Cada fichero se respalda y se restaura si empeora. ¿Continuar?')\">"
               . "<input type='hidden' name='id' value='$id'><input type='hidden' name='i' value='$i'>"
               . "<button class='btn'>⚡ Reparar TODO con IA</button></form>"
             : "<div class='muted'>⚡ Reparacion automatica: configura una IA en <a href='/'>Ajustes</a> (preset Ollama = gratis y local).</div>";

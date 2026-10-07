@@ -126,6 +126,26 @@ foreach (($res['findings'] ?? []) as $n => $f) {
         $fail('ya esta en cuarentena — no se parchea'); continue;
     }
 
+    // 1c. Reglas que CAMBIAN el comportamiento de la web (csrf, control de
+    // acceso, sesiones) nunca se auto-aplican: un parche de este tipo puede
+    // dejar formularios/endpoints rechazando peticiones legitimas sin dar
+    // error 500 (fallo silencioso). Se genera propuesta y se revisa a mano.
+    $manualRules = ['csrf', 'access', 'auth', 'authentication', 'session',
+                    'clickjacking', 'open-redirect', 'rate-limit'];
+    if (in_array(strtolower((string) ($f['rule'] ?? '')), $manualRules, true)) {
+        $fail('revision manual — esta regla cambia el comportamiento de la web; generala y aplicala una a una desde /fix');
+        continue;
+    }
+
+    // 1d. Estado base del fichero por HTTP (para rollback por empeoramiento,
+    //     no solo por 500)
+    $drC   = rtrim((string) ($conn['docroot'] ?? ''), '/');
+    $fileUrl = ($kind === 'ftp' && $siteUrl !== '' && $drC !== ''
+                && str_starts_with((string) $rpath, $drC . '/'))
+        ? $siteUrl . '/' . substr((string) $rpath, strlen($drC) + 1)
+        : '';
+    $baseFile = $fileUrl !== '' ? RemoteAudit::httpStatus($fileUrl) : -1;
+
     // 2. Descargar (+ copia local auditable)
     $code = $kind === 'ftp' ? RemoteAudit::ftpDownload($conn, $rpath) : @file_get_contents($rpath);
     if ($code === null || $code === false || $code === '') { $fail('no se pudo leer el fichero'); continue; }
@@ -137,22 +157,37 @@ foreach (($res['findings'] ?? []) as $n => $f) {
     $new = $ai['code'];
     if (!str_starts_with(ltrim($new), '<')) { $fail('la IA no devolvio codigo'); continue; }
 
-    // Si la IA usa helpers CSRF sin definirlos, los inyectamos (idempotente)
+    // Si la IA usa helpers CSRF sin definirlos, los inyectamos (idempotente).
+    // OJO: incluyen session_start() condicional — sin sesion activa,
+    // csrf_verify() rechazaria TODAS las peticiones (fallo silencioso).
     if (preg_match('/csrf_(token|verify)\s*\(/', $new) && !preg_match('/function\s+csrf_(token|verify)/', $new)) {
         $helpers = <<<'PHP'
 
 // --- CyberShield: helpers CSRF ---
 if (!function_exists('csrf_token')) {
     function csrf_token(): string {
+        if (session_status() === PHP_SESSION_NONE) { @session_start(); }
         if (empty($_SESSION['csrf'])) { $_SESSION['csrf'] = bin2hex(random_bytes(32)); }
         return $_SESSION['csrf'];
     }
     function csrf_verify(string $t): bool {
+        if (session_status() === PHP_SESSION_NONE) { @session_start(); }
         return isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $t);
     }
 }
 PHP;
         $new = preg_replace('/\?>\s*$/', '', $new) . $helpers . "\n";
+    }
+
+    // Si la IA escapa con e() sin definirla (XSS), la inyectamos (idempotente)
+    if (preg_match('/\be\s*\(/', $new) && !preg_match('/function\s+e\s*\(/', $new)) {
+        $new = preg_replace('/\?>\s*$/', '', $new) . <<<'PHP'
+
+// --- CyberShield: helper de escape XSS ---
+if (!function_exists('e')) {
+    function e($s): string { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
+}
+PHP;
     }
 
     // 4. Sintaxis
@@ -176,13 +211,17 @@ PHP;
             $fail('verificacion post-subida fallo (fichero vacio/corrupto) — restaurado');
             continue;
         }
-        // 6. Post-check: si la web o el fichero parcheado caen, rollback
-        $st = $siteUrl !== '' ? RemoteAudit::httpStatus($siteUrl) : 0;
-        $fileUrl = $siteUrl . '/' . ltrim(substr($rpath, strlen(rtrim((string) ($conn['docroot'] ?? ''), '/'))), '/');
-        $stFile = $siteUrl !== '' ? RemoteAudit::httpStatus($fileUrl) : 0;
-        if ($st >= 500 || $stFile >= 500) {
+        // 6. Post-check: rollback si la web cae (500) O si el fichero
+        //    EMPEORA de estado respecto a antes del parche (p.ej. un 200
+        //    que pasa a 403/404 = rotura funcional aunque no haya error).
+        $st     = $siteUrl !== '' ? RemoteAudit::httpStatus($siteUrl) : 0;
+        $stFile = $fileUrl !== '' ? RemoteAudit::httpStatus($fileUrl) : 0;
+        $worse  = $stFile >= 400
+            || ($baseFile >= 200 && $baseFile < 400 && ($stFile === 0 || $stFile >= 400));
+        if ($st >= 500 || $worse) {
             RemoteAudit::ftpMove($conn, $bak, $rpath); // restaura el original
-            $fail('HTTP ' . max($st, $stFile) . ' tras el parche — restaurado');
+            $fail('empeoro tras el parche (fichero HTTP ' . $stFile
+                . ', antes ' . ($baseFile >= 0 ? $baseFile : '?') . '; web ' . $st . ') — restaurado');
             continue;
         }
     } else {
