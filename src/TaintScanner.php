@@ -42,6 +42,9 @@ class TaintScanner
                 $path = $f->getPathname();
                 $rel = '/' . str_replace('\\', '/', substr($path, strlen($dir) + 1)) . '/';
                 if (preg_match('#/(vendor|node_modules|\.git|dist|bin|assets)/#i', $rel)) continue;
+                // Cuarentena propia: ya esta neutralizada por .htaccess,
+                // escanearla solo genera falsos criticos permanentes.
+                if (preg_match('#/(_cs_cuarentena|\.cybershield-quarantine)/#i', $rel)) continue;
                 $this->scanFile($path);
                 $this->filesScanned++;
             }
