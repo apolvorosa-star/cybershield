@@ -150,6 +150,32 @@ class RemoteAudit
         return (bool) $ok;
     }
 
+    /** Lista nombres (base) de un directorio remoto. null si falla o no existe. */
+    public static function ftpList(array $conn, string $remoteDir): ?array
+    {
+        $ftp = self::ftpOpen($conn);
+        if (!$ftp) return null;
+        $items = @ftp_nlist($ftp, $remoteDir);
+        ftp_close($ftp);
+        if (!is_array($items)) return null;
+        $out = [];
+        foreach ($items as $it) {
+            $b = basename(str_replace('\\', '/', (string) $it));
+            if ($b !== '' && $b !== '.' && $b !== '..') $out[] = $b;
+        }
+        return array_values(array_unique($out));
+    }
+
+    /** Tamano de un fichero remoto; -1 si no existe o es directorio. */
+    public static function ftpSize(array $conn, string $remote): int
+    {
+        $ftp = self::ftpOpen($conn);
+        if (!$ftp) return -1;
+        $s = @ftp_size($ftp, $remote);
+        ftp_close($ftp);
+        return (int) $s;
+    }
+
     /**
      * Mapea la ruta de disco que reporta el agente a la ruta FTP de la ficha.
      * Devuelve null si la ruta resuelve fuera del docroot (anti path-traversal).

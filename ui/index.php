@@ -19,6 +19,8 @@ $settingsFile = $jobsRoot . '/settings.json';
 require_once $root . '/src/CredentialStore.php';
 require_once $root . '/src/RemoteAudit.php';
 require_once $root . '/src/AiFixer.php';
+require_once $root . '/src/Whitelist.php';
+require_once $root . '/src/RemoteFixer.php';
 Orizon\CyberShield\CredentialStore::init($jobsRoot);
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';
@@ -265,13 +267,26 @@ if ($path === '/fix') {
 
     if (!isset($_GET['n'])) {
         // Lista de hallazgos criticos/altos reparables
+        $tconn = $job['targets'][$i]['conn'] ?? null;
+        $wlRules = Orizon\CyberShield\Whitelist::rules(
+            $tconn ? array_merge($tconn, ['pass' => Orizon\CyberShield\CredentialStore::decrypt((string) ($tconn['pass'] ?? ''))]) : null
+        );
+        $wlCheck = function (string $fpath) use ($wlRules, $job, $i, $res, $resolveRemote): bool {
+            [$k, $rp, $c] = $resolveRemote($job, $i, ['file' => $fpath]);
+            if ($k === 'invalid') return true; // fuera de docroot = bloqueado igualmente
+            return Orizon\CyberShield\Whitelist::check($wlRules, (string) $rp, $c ?: null, (string) ($res['target'] ?? ''))
+                || Orizon\CyberShield\Whitelist::isProtectedName((string) $rp);
+        };
         $rows = '';
         foreach ($res['findings'] as $n => $f) {
             if (!in_array($f['severity'], ['critical', 'high'], true)) continue;
             $isPhp = str_ends_with(strtolower((string) $f['file']), '.php');
-            $btn = $isPhp
-                ? "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n'>Reparar</a>"
-                : "<span class='muted'>manual</span>";
+            $prot = $isPhp && $wlCheck((string) $f['file']);
+            $btn = !$isPhp
+                ? "<span class='muted'>manual</span>"
+                : ($prot
+                    ? "<span class='muted' title='En whitelist o fichero protegido'>🛡 protegido</span>"
+                    : "<a class='btn sm' href='/fix?id=$id&i=$i&n=$n'>Reparar</a>");
             $sev = $f['severity'] === 'critical' ? '🔴' : '🟠';
             $rel = basename((string) $f['file']);
             $rows .= "<div class='job'><div>$sev <b>{$f['rule']}</b> <span class='ur'>$rel:{$f['line']}</span>"
@@ -283,7 +298,15 @@ if ($path === '/fix') {
               . "<input type='hidden' name='id' value='$id'><input type='hidden' name='i' value='$i'>"
               . "<button class='btn'>⚡ Reparar TODO con IA</button></form>"
             : "<div class='muted'>⚡ Reparacion automatica: configura una IA en <a href='/'>Ajustes</a> (preset Ollama = gratis y local).</div>";
-        echo "<div class='row' style='margin-bottom:14px'>$autoBtn</div>";
+        // Fixes rapidos sin IA (solo objetivos con FTP): .htaccess anti-.env/.sql,
+        // cuarentena de dumps sueltos y uploads sin ejecucion
+        $quickBtn = '';
+        if ($tconn) {
+            $quickBtn = "<form method='post' action='/fix/quick' onsubmit=\"return confirm('Se aplicaran fixes rapidos SIN IA en el servidor: .htaccess de seguridad, cuarentena de .sql/.bak/.zip sueltos y proteccion de uploads. Respeta la whitelist. ¿Continuar?')\">"
+                . "<input type='hidden' name='id' value='$id'><input type='hidden' name='i' value='$i'>"
+                . "<button class='btn sm'>🛡 Fixes rapidos sin IA</button></form>";
+        }
+        echo "<div class='row' style='margin-bottom:14px'>$autoBtn $quickBtn</div>";
         echo $rows ?: "<div class='muted'>Sin hallazgos criticos/altos reparables con IA.</div>";
         echo "<div class='links' style='margin-top:14px'><a href='/job?id=$id'>← volver a la auditoria</a></div></div></body></html>";
         return true;
@@ -372,6 +395,13 @@ if ($path === '/fix/apply' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         echo "<div class='alert'>Ruta fuera del docroot — reparacion bloqueada.</div></div></body></html>";
         return true;
     }
+    // Whitelist + ficheros protegidos: nunca se reescriben
+    $wlRules = Orizon\CyberShield\Whitelist::rules($conn ?: null);
+    if (Orizon\CyberShield\Whitelist::check($wlRules, (string) $rpath, $conn ?: null, (string) ($res['target'] ?? ''))
+        || Orizon\CyberShield\Whitelist::isProtectedName((string) $rpath)) {
+        echo "<div class='alert'>🛡 <b>" . htmlspecialchars(basename((string) $rpath)) . "</b> esta en la whitelist o es un fichero protegido (.env/config) — no se reescribe. Los .env se protegen con el .htaccess de los fixes rapidos.</div></div></body></html>";
+        return true;
+    }
     if ($kind === 'ftp') {
         $bak  = ($conn['docroot'] ?? '') . '/_cs_cuarentena/' . basename($rpath) . '.' . date('Ymd-His') . '.bak';
         Orizon\CyberShield\RemoteAudit::ftpUpload($conn, ($conn['docroot'] ?? '') . '/_cs_cuarentena/.htaccess', "Require all denied\nDeny from all\n");
@@ -407,6 +437,38 @@ if ($path === '/fix/auto' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             . ' > ' . escapeshellarg($log) . ' 2>&1 &');
     }
     header("Location: /fix/auto?id=$id&i=$i");
+    return true;
+}
+
+// ---------- Fixes rapidos sin IA (FTP): htaccess + cuarentena + uploads ----------
+if ($path === '/fix/quick' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id  = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['id'] ?? '');
+    $i   = (int) ($_POST['i'] ?? 0);
+    $job = json_decode((string) @file_get_contents("$jobsRoot/$id/job.json"), true);
+    $res = json_decode((string) @file_get_contents("$jobsRoot/$id/t$i.json"), true);
+    echo head('Fixes rapidos', $logo);
+    echo "<div class='card'><h2>🛡 Fixes rapidos sin IA</h2>";
+    $conn = $job['targets'][$i]['conn'] ?? null;
+    if (!$job || !$res || !$conn) {
+        echo "<div class='alert'>Este objetivo no tiene conexion FTP configurada — los fixes rapidos solo aplican a servidores remotos.</div>";
+    } else {
+        $conn['pass'] = Orizon\CyberShield\CredentialStore::decrypt((string) ($conn['pass'] ?? ''));
+        $actions = Orizon\CyberShield\RemoteFixer::quickFixes($conn, (string) ($res['target'] ?? ''));
+        $lines = [];
+        echo "<table style='width:100%;border-collapse:collapse;font-size:13px'>";
+        foreach ($actions as $a) {
+            $ico = $a['ok'] ? '✅' : '❌';
+            echo "<tr style='border-top:1px solid #1e293b'><td style='padding:7px 4px'>$ico</td>"
+                . "<td style='padding:7px 4px'><b>" . htmlspecialchars($a['accion']) . "</b></td>"
+                . "<td class='muted' style='padding:7px 4px'>" . htmlspecialchars($a['detalle']) . "</td></tr>";
+            $lines[] = ($a['ok'] ? '[ok] ' : '[!!] ') . $a['accion'] . ' — ' . $a['detalle'];
+        }
+        echo "</table>";
+        @file_put_contents("$jobsRoot/$id/quickfix-$i.log", implode("\n", $lines) . "\n");
+        echo "<div class='links' style='margin-top:14px'><a href='/fix?id=$id&i=$i'>← hallazgos</a>"
+            . "<a href='/'>🔁 re-auditar para verificar</a></div>";
+    }
+    echo "</div></body></html>";
     return true;
 }
 

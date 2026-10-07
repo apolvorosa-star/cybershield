@@ -13,6 +13,8 @@ use Orizon\CyberShield\AiFixer;
 use Orizon\CyberShield\CredentialStore;
 use Orizon\CyberShield\Notifier;
 use Orizon\CyberShield\RemoteAudit;
+use Orizon\CyberShield\RemoteFixer;
+use Orizon\CyberShield\Whitelist;
 
 $jobDir = $argv[2] ?? '';
 $ti     = (int) ($argv[3] ?? 0);
@@ -33,6 +35,12 @@ if ($conn && !empty($conn['pass'])) {
 }
 $drDisk = $res['docroot'] ?? null;
 $siteUrl = rtrim((string) ($res['target'] ?? ''), '/');
+
+// ── Lista blanca compartida: whitelist.txt/.dist locales +
+//    .cybershield-whitelist del docroot remoto (los ficheros listados
+//    NO se auto-reparan ni van a cuarentena).
+$wlRules = Whitelist::rules($conn);
+$isWhitelisted = fn(string $rpath): bool => Whitelist::check($wlRules, $rpath, $conn, $siteUrl);
 
 $state = ['state' => 'running', 'target' => $res['target'] ?? '', 'results' => []];
 // Re-runs incrementales: los hallazgos ya reparados no se reprocesan
@@ -60,6 +68,33 @@ $lint = function (string $code): ?string {
     return $rc === 0 ? null : implode("\n", $o);
 };
 
+// ── 0. Fixes rapidos sin IA (htaccess, cuarentena de dumps, uploads) ──
+//    Van primero: son idempotentes y resuelven los .env/.sql expuestos
+//    aunque la IA luego falle. Solo sobre objetivos FTP.
+if ($conn) {
+    $state['results'][] = ['n' => -1, 'rule' => '⚡ fix rapido', 'file' => '', 'result' => 'running', 'note' => 'htaccess + cuarentena + uploads'];
+    $save();
+    $quick = RemoteFixer::quickFixes($conn, $siteUrl);
+    $logL  = [];
+    foreach ($quick as $q) {
+        $logL[] = ($q['ok'] ? '[ok] ' : '[!!] ') . $q['accion'] . ' — ' . $q['detalle'];
+        $state['results'][] = [
+            'n' => -1, 'rule' => '⚡ ' . $q['accion'], 'file' => '',
+            'result' => $q['ok'] ? 'ok' : 'skip', 'note' => $q['detalle'],
+        ];
+    }
+    @file_put_contents("$jobDir/quickfix-$ti.log", implode("\n", $logL) . "\n");
+    $state['results'] = array_values(array_filter(
+        $state['results'],
+        fn($r) => !(($r['n'] ?? 0) === -1 && ($r['result'] ?? '') === 'running')
+    ));
+    $save();
+}
+
+// Copias locales de todo lo descargado (auditable despues)
+$backupDir = "$jobDir/backups-t$ti";
+if (!is_dir($backupDir)) @mkdir($backupDir, 0777, true);
+
 foreach (($res['findings'] ?? []) as $n => $f) {
     if (!in_array($f['severity'] ?? '', ['critical', 'high'], true)) continue;
     $file = (string) ($f['file'] ?? '');
@@ -83,9 +118,14 @@ foreach (($res['findings'] ?? []) as $n => $f) {
         $kind = 'ftp';
     } else { $rpath = $file; $kind = 'local'; }
 
-    // 2. Descargar
+    // 1b. Whitelist + ficheros protegidos (secretos/config nunca se reescriben)
+    if ($isWhitelisted((string) $rpath)) { $fail('en whitelist — protegido, no se toca'); continue; }
+    if (Whitelist::isProtectedName((string) $rpath)) { $fail('fichero protegido (.env/config) — se protege por .htaccess, no se reescribe'); continue; }
+
+    // 2. Descargar (+ copia local auditable)
     $code = $kind === 'ftp' ? RemoteAudit::ftpDownload($conn, $rpath) : @file_get_contents($rpath);
     if ($code === null || $code === false || $code === '') { $fail('no se pudo leer el fichero'); continue; }
+    @file_put_contents("$backupDir/" . basename((string) $rpath) . '.orig', $code);
 
     // 3. IA propone
     $ai = AiFixer::fix($settings, $f, $code, $file);
