@@ -47,6 +47,10 @@ Reglas:
 - Mantén el comportamiento funcional identico
 - Sanea/escapa el dato contaminado en el punto exacto del fallo
 - Si hay mas vulnerabilidades evidentes del mismo tipo, corrigelas tambien
+- NO llames a funciones que no existan en el fichero o sus includes
+  (p.ej. csrf_token()): si necesitas helpers, DEFÍNELOS dentro del fichero
+- Si generas un token en un formulario, verifica EXACTAMENTE ese mismo
+  campo/nombre al procesar el POST
 - Responde SOLO con el codigo entre ```php y ```
 
 CODIGO ACTUAL:
@@ -67,14 +71,32 @@ PROMPT;
         }
         $model = trim($settings['ai_model'] ?? '') ?: 'gpt-4o-mini';
 
-        $payload = json_encode([
-            'model'    => $model,
-            'messages' => [
-                ['role' => 'system', 'content' => 'Eres un experto en seguridad PHP. Respondes solo con codigo.'],
-                ['role' => 'user',   'content' => self::buildPrompt($f, $code, $file)],
-            ],
-            'temperature' => 0.1,
-        ]);
+        $messages = [
+            ['role' => 'system', 'content' => 'Eres un experto en seguridad PHP. Respondes solo con codigo.'],
+            ['role' => 'user',   'content' => self::buildPrompt($f, $code, $file)],
+        ];
+
+        // Ollama: usar API nativa para poder subir num_ctx (ficheros grandes)
+        $isOllama = (bool) preg_match('#://[^/]*:?11434#', $url);
+        if ($isOllama) {
+            $url = preg_replace('#/v1/.*$#', '/api/chat', $url);
+            $payload = json_encode([
+                'model'    => $model,
+                'messages' => $messages,
+                'stream'   => false,
+                'options'  => [
+                    'temperature' => 0.1,
+                    // contexto adaptativo: ~3 chars/token, entrada+salida completas
+                    'num_ctx' => max(8192, min(65536, (int) ceil(strlen($code) / 3 * 2 + 1024))),
+                ],
+            ]);
+        } else {
+            $payload = json_encode([
+                'model'       => $model,
+                'messages'    => $messages,
+                'temperature' => 0.1,
+            ]);
+        }
 
         $ctx = stream_context_create(['http' => [
             'method'  => 'POST',
@@ -86,7 +108,9 @@ PROMPT;
         $resp = @file_get_contents($url, false, $ctx);
         if ($resp === false) return ['error' => 'No se pudo contactar con la API de IA'];
         $j = json_decode($resp, true);
-        $text = $j['choices'][0]['message']['content'] ?? '';
+        $text = $isOllama
+            ? ($j['message']['content'] ?? '')
+            : ($j['choices'][0]['message']['content'] ?? '');
         if ($text === '') {
             return ['error' => 'Respuesta vacia de la IA: ' . substr($resp, 0, 200)];
         }

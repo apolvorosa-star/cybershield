@@ -85,6 +85,24 @@ foreach (($res['findings'] ?? []) as $n => $f) {
     $new = $ai['code'];
     if (!str_starts_with(ltrim($new), '<')) { $fail('la IA no devolvio codigo'); continue; }
 
+    // Si la IA usa helpers CSRF sin definirlos, los inyectamos (idempotente)
+    if (preg_match('/csrf_(token|verify)\s*\(/', $new) && !preg_match('/function\s+csrf_(token|verify)/', $new)) {
+        $helpers = <<<'PHP'
+
+// --- CyberShield: helpers CSRF ---
+if (!function_exists('csrf_token')) {
+    function csrf_token(): string {
+        if (empty($_SESSION['csrf'])) { $_SESSION['csrf'] = bin2hex(random_bytes(32)); }
+        return $_SESSION['csrf'];
+    }
+    function csrf_verify(string $t): bool {
+        return isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $t);
+    }
+}
+PHP;
+        $new = preg_replace('/\?>\s*$/', '', $new) . $helpers . "\n";
+    }
+
     // 4. Sintaxis
     if (($err = $lint($new)) !== null) { $fail("no compila: " . strtok($err, "\n")); continue; }
     if ($new === $code) { $fail('la IA no propuso cambios'); continue; }
@@ -99,12 +117,21 @@ foreach (($res['findings'] ?? []) as $n => $f) {
             RemoteAudit::ftpMove($conn, $bak, $rpath); // intenta restaurar
             $fail('fallo la subida (restaurado)'); continue;
         }
-        // 6. Post-check: si la web cae, rollback automatico
-        $st = $siteUrl !== '' ? RemoteAudit::httpStatus($siteUrl) : 0;
-        if ($st >= 500) {
+        // 5b. Verificacion post-subida: lo que quedo debe ser lo que enviamos
+        $verify = RemoteAudit::ftpDownload($conn, $rpath);
+        if ($verify === null || md5((string) $verify) !== md5($new)) {
             RemoteAudit::ftpMove($conn, $bak, $rpath);
-            RemoteAudit::ftpUpload($conn, $rpath, RemoteAudit::ftpDownload($conn, $bak) ?: $code);
-            $fail("la web devolvio HTTP $st tras el parche — restaurado"); continue;
+            $fail('verificacion post-subida fallo (fichero vacio/corrupto) — restaurado');
+            continue;
+        }
+        // 6. Post-check: si la web o el fichero parcheado caen, rollback
+        $st = $siteUrl !== '' ? RemoteAudit::httpStatus($siteUrl) : 0;
+        $fileUrl = $siteUrl . '/' . ltrim(substr($rpath, strlen(rtrim((string) ($conn['docroot'] ?? ''), '/'))), '/');
+        $stFile = $siteUrl !== '' ? RemoteAudit::httpStatus($fileUrl) : 0;
+        if ($st >= 500 || $stFile >= 500) {
+            RemoteAudit::ftpMove($conn, $bak, $rpath); // restaura el original
+            $fail('HTTP ' . max($st, $stFile) . ' tras el parche — restaurado');
+            continue;
         }
     } else {
         if (!@copy($rpath, $rpath . '.bak-' . date('Ymd-His'))) { $fail('no se pudo hacer backup'); continue; }
