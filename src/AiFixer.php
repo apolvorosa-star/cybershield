@@ -168,6 +168,13 @@ PROMPT;
         if (!preg_match('/```(?:php)?\s*\n(.*?)```/s', $text)) {
             return ['error' => 'la IA no devolvio bloque de codigo: ' . substr(trim($text), 0, 120)];
         }
+        // Anti scope-creep: la ventana corregida no puede desviarse mucho
+        // en tamaño (la IA a veces "mejora" el fichero añadiendo features).
+        $winLines = $win[1] - ($win[0] - 1);
+        $newLines = substr_count($slice, "\n") + 1;
+        if ($newLines > $winLines * 1.6 || $newLines < $winLines * 0.3) {
+            return ['error' => "la IA devolvio $newLines lineas para una ventana de $winLines — posible scope creep, descartado"];
+        }
 
         // Empalmar la ventana corregida dentro del fichero completo
         [$ws, $we] = $win;

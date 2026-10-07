@@ -35,6 +35,12 @@ $drDisk = $res['docroot'] ?? null;
 $siteUrl = rtrim((string) ($res['target'] ?? ''), '/');
 
 $state = ['state' => 'running', 'target' => $res['target'] ?? '', 'results' => []];
+// Re-runs incrementales: los hallazgos ya reparados no se reprocesan
+$prev = json_decode((string) @file_get_contents($fxFile), true);
+$doneOk = [];
+foreach (($prev['results'] ?? []) as $r) {
+    if (($r['result'] ?? '') === 'ok') $doneOk[(int) $r['n']] = $r;
+}
 $save = function () use ($fxFile, &$state): void {
     file_put_contents($fxFile, json_encode($state, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 };
@@ -58,6 +64,8 @@ foreach (($res['findings'] ?? []) as $n => $f) {
     if (!in_array($f['severity'] ?? '', ['critical', 'high'], true)) continue;
     $file = (string) ($f['file'] ?? '');
     if (!str_ends_with(strtolower($file), '.php')) continue;
+
+    if (isset($doneOk[$n])) { $state['results'][] = $doneOk[$n]; $save(); continue; }
 
     $row = ['n' => $n, 'rule' => $f['rule'] ?? '', 'file' => $file, 'result' => 'running'];
     $state['results'][] = $row; $idx = array_key_last($state['results']); $save();
