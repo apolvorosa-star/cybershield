@@ -17,7 +17,11 @@ namespace Orizon\CyberShield;
 
 class AiFixer
 {
-    public static function buildPrompt(array $f, string $code, string $file): string
+    /** Ficheros grandes: ventana ±80 lineas alrededor del fallo. */
+    private const BIG_FILE = 40000;
+    private const WINDOW   = 80;
+
+    public static function buildPrompt(array $f, string $code, string $file, ?array $win = null): string
     {
         $rule = $f['rule'] ?? 'vuln';
         $line = (int) ($f['line'] ?? 0);
@@ -32,6 +36,35 @@ class AiFixer
               . "Para CSRF en APIs la correccion es rechazar metodos que no sean POST "
               . "(HTTP 405) y leer solo \$_POST."
             : '';
+
+        // Ventana: fichero grande → pedir solo el rango corregido
+        if ($win !== null) {
+            [$ws, $we] = $win;
+            $lineaExacta = trim((string) ($f['code'] ?? ''));
+            $exacta = $lineaExacta !== ''
+                ? "\nLINEA VULNERABLE EXACTA (linea $line): `$lineaExacta`" : '';
+            return <<<PROMPT
+Eres un experto en seguridad PHP. El archivo es demasiado grande para enviarlo
+entero: te paso SOLO las lineas $ws-$we, que contienen la vulnerabilidad.
+
+ARCHIVO: $file
+VULNERABILIDAD: $rule (linea $line)
+DESCRIPCION: $desc
+RECOMENDACION DEL SCANNER: $fix$exacta$apiHint
+
+Reglas:
+- Devuelve UNICAMENTE las lineas $ws-$we corregidas — ni una linea mas ni menos
+- No repitas el resto del fichero, no expliques nada
+- Corrige SOLO la vulnerabilidad; conserva estilo y comportamiento
+- Si hay mas vulnerabilidades evidentes del mismo tipo en el rango, corrigelas
+- Responde SOLO con el codigo entre ```php y ```
+
+CODIGO (lineas $ws-$we):
+```php
+$code
+```
+PROMPT;
+        }
 
         return <<<PROMPT
 Eres un experto en seguridad PHP. Corrige el siguiente archivo corrigiendo
@@ -71,9 +104,21 @@ PROMPT;
         }
         $model = trim($settings['ai_model'] ?? '') ?: 'gpt-4o-mini';
 
+        // Fichero grande: ventana alrededor del fallo; el resultado se empala
+        $win = null;
+        $promptCode = $code;
+        $line = (int) ($f['line'] ?? 0);
+        if (strlen($code) > self::BIG_FILE && $line > 0) {
+            $lines  = explode("\n", $code);
+            $ws     = max(0, $line - self::WINDOW - 1);
+            $we     = min(count($lines), $line + self::WINDOW);
+            $win    = [$ws + 1, $we];
+            $promptCode = implode("\n", array_slice($lines, $ws, $we - $ws));
+        }
+
         $messages = [
             ['role' => 'system', 'content' => 'Eres un experto en seguridad PHP. Respondes solo con codigo.'],
-            ['role' => 'user',   'content' => self::buildPrompt($f, $code, $file)],
+            ['role' => 'user',   'content' => self::buildPrompt($f, $promptCode, $file, $win)],
         ];
 
         // Ollama: usar API nativa para poder subir num_ctx (ficheros grandes)
@@ -86,8 +131,9 @@ PROMPT;
                 'stream'   => false,
                 'options'  => [
                     'temperature' => 0.1,
+                    'num_predict' => -1, // generacion sin tope
                     // contexto adaptativo: ~3 chars/token, entrada+salida completas
-                    'num_ctx' => max(8192, min(65536, (int) ceil(strlen($code) / 3 * 2 + 1024))),
+                    'num_ctx' => max(8192, min(65536, (int) ceil(strlen($promptCode) / 3 * 2 + 1024))),
                 ],
             ]);
         } else {
@@ -114,7 +160,20 @@ PROMPT;
         if ($text === '') {
             return ['error' => 'Respuesta vacia de la IA: ' . substr($resp, 0, 200)];
         }
-        return ['code' => self::extractCode($text)];
+        $slice = self::extractCode($text);
+        if ($win === null) return ['code' => $slice];
+
+        // En modo ventana EXIGIMOS bloque ```: si la IA respondio con prosa
+        // ("no hay vulnerabilidad", explicaciones…), no se empala nada.
+        if (!preg_match('/```(?:php)?\s*\n(.*?)```/s', $text)) {
+            return ['error' => 'la IA no devolvio bloque de codigo: ' . substr(trim($text), 0, 120)];
+        }
+
+        // Empalmar la ventana corregida dentro del fichero completo
+        [$ws, $we] = $win;
+        $lines = explode("\n", $code);
+        array_splice($lines, $ws - 1, $we - ($ws - 1), explode("\n", rtrim($slice)));
+        return ['code' => implode("\n", $lines)];
     }
 
     /** Extrae el codigo de una respuesta con fences ```php ... ``` */
